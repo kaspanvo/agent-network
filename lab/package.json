@@ -1,0 +1,21 @@
+{
+  "name": "village-lab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent Lab: compares matching, bilateral negotiation and multi-party rooms on the same population",
+  "type": "module",
+  "scripts": {
+    "lab": "tsx src/cli.ts",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.10",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
+  }
+}

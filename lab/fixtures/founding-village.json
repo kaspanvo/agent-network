@@ -1,0 +1,161 @@
+{
+  "name": "founding-village",
+  "description": "Hand-built smoke-test population. Each case exercises one mechanism (reciprocal trade, no zone of agreement, lexical false match, blocker resolution, unfillable seat). It is not evidence: replace with real elicited intents before drawing conclusions. Subscription prices are monthly; other prices are one-off.",
+  "synthetic": true,
+  "principals": [
+    { "id": "maya", "kind": "person", "name": "Maya" },
+    { "id": "tom", "kind": "person", "name": "Tom" },
+    { "id": "brightdesk", "kind": "business", "name": "Brightdesk" },
+    { "id": "ledgerly", "kind": "business", "name": "Ledgerly" },
+    { "id": "sam", "kind": "person", "name": "Sam", "hoursPerWeek": 6 },
+    { "id": "priya", "kind": "person", "name": "Priya", "hoursPerWeek": 2 },
+    { "id": "nova", "kind": "business", "name": "Nova Labs" },
+    { "id": "leo", "kind": "person", "name": "Leo", "hoursPerWeek": 5 },
+    { "id": "ana", "kind": "person", "name": "Ana", "hoursPerWeek": 3 },
+    { "id": "jo", "kind": "person", "name": "Jo" },
+    { "id": "harbor", "kind": "business", "name": "Harbor Café" },
+    { "id": "tillco", "kind": "business", "name": "TillCo" }
+  ],
+  "intents": [
+    {
+      "id": "maya-camera",
+      "principalId": "maya",
+      "direction": "seek",
+      "status": "active",
+      "summary": "Looking for a used mirrorless camera for a trip in the spring, ideally under $700.",
+      "tag": "used-camera",
+      "reservationPrice": 700
+    },
+    {
+      "id": "tom-camera",
+      "principalId": "tom",
+      "direction": "offer",
+      "status": "dormant",
+      "summary": "I have a Sony mirrorless camera I've barely used since last year. I'd sell it for a fair offer.",
+      "tag": "used-camera",
+      "reservationPrice": 550
+    },
+    {
+      "id": "brightdesk-crm",
+      "principalId": "brightdesk",
+      "direction": "seek",
+      "status": "conditional",
+      "summary": "We pay $60 a month for our CRM. We'd switch to something equivalent that costs meaningfully less.",
+      "tag": "crm-software",
+      "reservationPrice": 50,
+      "blockers": [
+        {
+          "description": "We won't migrate our customer data ourselves",
+          "resolvedBy": "data-migration",
+          "maxContribution": 0
+        }
+      ]
+    },
+    {
+      "id": "ledgerly-crm",
+      "principalId": "ledgerly",
+      "direction": "offer",
+      "status": "active",
+      "summary": "Our CRM costs $45 a month, and we'll invest in acquiring the right small-business customers.",
+      "tag": "crm-software",
+      "reservationPrice": 45,
+      "capacity": 50,
+      "incentiveBudget": 100
+    },
+    {
+      "id": "sam-migration",
+      "principalId": "sam",
+      "direction": "offer",
+      "status": "conditional",
+      "summary": "I'm a backend engineer and could take on small data migrations over a weekend.",
+      "tag": "data-migration",
+      "reservationPrice": 90,
+      "hours": 4
+    },
+    {
+      "id": "priya-feedback",
+      "principalId": "priya",
+      "direction": "offer",
+      "status": "conditional",
+      "summary": "Happy to test early B2B tools and give honest feedback if it's paid.",
+      "tag": "product-feedback",
+      "reservationPrice": 40,
+      "hours": 1
+    },
+    {
+      "id": "nova-feedback",
+      "principalId": "nova",
+      "direction": "seek",
+      "status": "active",
+      "summary": "We need a B2B user to review our onboarding flow this month.",
+      "tag": "product-feedback",
+      "reservationPrice": 60
+    },
+    {
+      "id": "leo-advisory",
+      "principalId": "leo",
+      "direction": "offer",
+      "status": "conditional",
+      "summary": "Open to a few hours a week of paid product advisory, remote only.",
+      "tag": "advisory",
+      "reservationPrice": 600,
+      "hours": 5
+    },
+    {
+      "id": "nova-advisory",
+      "principalId": "nova",
+      "direction": "seek",
+      "status": "conditional",
+      "summary": "We need part-time product advice but we're not ready to hire.",
+      "tag": "advisory",
+      "reservationPrice": 500
+    },
+    {
+      "id": "ana-advisory",
+      "principalId": "ana",
+      "direction": "offer",
+      "status": "dormant",
+      "summary": "I'd do occasional product strategy sessions for early-stage founders.",
+      "tag": "advisory",
+      "reservationPrice": 450,
+      "hours": 3,
+      "mandate": { "mayNegotiate": true, "mayJoinMultiParty": false }
+    },
+    {
+      "id": "jo-repair",
+      "principalId": "jo",
+      "direction": "seek",
+      "status": "active",
+      "summary": "My mirrorless camera's sensor needs cleaning, up to $80.",
+      "tag": "camera-repair",
+      "reservationPrice": 80
+    },
+    {
+      "id": "harbor-pos",
+      "principalId": "harbor",
+      "direction": "seek",
+      "status": "conditional",
+      "summary": "Our card terminal fees are too high; we'd switch POS if someone handled the setup.",
+      "tag": "pos-system",
+      "reservationPrice": 80,
+      "blockers": [
+        {
+          "description": "Nobody on staff can set up the new menu and hardware",
+          "resolvedBy": "pos-setup",
+          "maxContribution": 50
+        }
+      ]
+    },
+    {
+      "id": "tillco-pos",
+      "principalId": "tillco",
+      "direction": "offer",
+      "status": "active",
+      "summary": "Our POS is $60 a month with lower card fees; we'll fund onboarding for new cafés.",
+      "tag": "pos-system",
+      "reservationPrice": 60,
+      "capacity": 20,
+      "incentiveBudget": 40
+    }
+  ]
+}
