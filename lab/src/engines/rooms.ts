@@ -3,11 +3,11 @@ import { round2 } from "../money";
 import { concedingBuyer, concedingSeller, negotiate } from "../negotiation";
 import { candidateOffers, negotiateDirect } from "./common";
 
-// Village: dynamic rooms. Opens a room around a seek and a matching offer; when the seek has blockers,
+// Dynamic rooms. Opens a room around a seek and a matching offer; when the seek has blockers,
 // opens a seat per blocker, pools what the room's members will fund, and negotiates with whoever can fill it.
 // Patterns implemented: reciprocal, blocker-resolution.
 export const roomEngine: Engine = {
-  name: "Village · rooms",
+  name: "C · rooms",
   run(idx) {
     const result: EngineResult = { proposals: [], notes: [] };
 
@@ -41,7 +41,7 @@ export const roomEngine: Engine = {
 
         for (const [blockerIndex, blocker] of seek.blockers.entries()) {
           const pledged = round2(incentiveLeft + blocker.maxContribution);
-          const fillers = candidateOffers(idx, seek, blocker.resolvedBy).filter(
+          const fillers = candidateOffers(idx, seek, blocker.resolvedBy, "one-off").filter(
             (o) => o.mandate.mayJoinMultiParty && !members.has(o.principalId),
           );
 

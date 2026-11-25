@@ -49,9 +49,12 @@ export function summarize(run: EngineRun, idx: PopulationIndex): Summary {
   };
 }
 
+const BASIS_SUFFIX = { "one-off": "", "per-hour": "/hr", "per-month": "/mo" } as const;
+
 function describeDeal(d: Deal, idx: PopulationIndex): string {
-  const tag = idx.intents.get(d.offerIntentId)?.tag ?? "?";
-  let text = `${idx.nameOf(d.offerIntentId)} → ${idx.nameOf(d.forIntentId)} ${tag} ${formatMoney(d.price)}`;
+  const offer = idx.intents.get(d.offerIntentId);
+  const suffix = offer ? BASIS_SUFFIX[offer.priceBasis] : "";
+  let text = `${idx.nameOf(d.offerIntentId)} → ${idx.nameOf(d.forIntentId)} ${offer?.tag ?? "?"} ${formatMoney(d.price)}${suffix}`;
   const thirdParty = d.paidBy.filter((p) => p.fromIntentId !== d.forIntentId);
   if (thirdParty.length > 0)
     text += ` (paid by ${d.paidBy.map((p) => `${idx.nameOf(p.fromIntentId)} ${formatMoney(p.amount)}`).join(", ")})`;

@@ -11,7 +11,7 @@ const { values, positionals } = parseArgs({
   allowPositionals: true,
 });
 
-const path = positionals[0] ?? fileURLToPath(new URL("../fixtures/founding-village.json", import.meta.url));
+const path = positionals[0] ?? fileURLToPath(new URL("../fixtures/founding-cohort.json", import.meta.url));
 
 let population;
 try {

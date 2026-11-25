@@ -1,2 +1,5 @@
 node_modules/
 .DS_Store
+
+# Real interview answers. This repo is public.
+lab/data/

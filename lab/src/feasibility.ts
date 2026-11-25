@@ -118,6 +118,10 @@ export function violations(p: Proposal, idx: PopulationIndex): string[] {
     const needed = blocker ? blocker.resolvedBy : seek.tag;
 
     if (offer.tag !== needed) reasons.push(`${name(offer.id)} offers "${offer.tag}" but ${name(seek.id)} needs "${needed}"`);
+    // Seats are funded from one-off pots (incentive budgets, blocker contributions).
+    const neededBasis = blocker ? "one-off" : seek.priceBasis;
+    if (offer.priceBasis !== neededBasis)
+      reasons.push(`${name(offer.id)} prices ${offer.priceBasis} but this deal is priced ${neededBasis}`);
     if (offer.principalId === seek.principalId) reasons.push(`${name(offer.id)} cannot deal with themselves`);
     if (d.price < offer.reservationPrice - EPSILON)
       reasons.push(`${formatMoney(d.price)} is below ${name(offer.id)}'s floor of ${formatMoney(offer.reservationPrice)}`);

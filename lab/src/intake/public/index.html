@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Open Intake</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <header class="brand"><span class="mark" aria-hidden="true"></span>Open <span class="pilot">research pilot</span></header>
+
+      <section id="welcome" hidden>
+        <h1>What would you be open to?</h1>
+        <p class="lede">
+          A short conversation about things you might welcome if the right circumstances came along, and what you could offer
+          others. It takes about ten minutes.
+        </p>
+        <ul class="facts">
+          <li>Your answers are processed by Claude, Anthropic's AI, to run the interview.</li>
+          <li>They're saved on this computer for the Open research pilot.</li>
+          <li>At the end you review everything. Only what you confirm is kept for matching.</li>
+          <li>You can skip any question or stop at any time.</li>
+        </ul>
+        <form id="start-form">
+          <label class="field">
+            <span>First name or a nickname</span>
+            <input name="name" required maxlength="80" autocomplete="given-name" />
+          </label>
+          <fieldset>
+            <legend>I'm answering for</legend>
+            <label class="choice"><input type="radio" name="kind" value="person" checked /> Myself</label>
+            <label class="choice"><input type="radio" name="kind" value="business" /> A business</label>
+          </fieldset>
+          <label class="choice"><input type="checkbox" name="consent" required /> I understand and agree to take part</label>
+          <div class="actions"><button type="submit">Start the interview</button></div>
+          <p class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="chat" hidden>
+        <ol id="messages" aria-live="polite"></ol>
+        <form id="message-form">
+          <textarea name="text" rows="3" placeholder="Type your answer. Enter sends, Shift+Enter adds a line." required maxlength="4000"></textarea>
+          <div class="actions">
+            <button type="button" id="review-button" class="secondary">Review my answers</button>
+            <button type="submit">Send</button>
+          </div>
+          <p class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="review" hidden>
+        <h1>Here's what we understood</h1>
+        <p class="lede">Fix anything that's off and leave out anything you don't want kept. Only what you confirm is saved for matching.</p>
+        <form id="review-form" novalidate>
+          <label class="field">
+            <span>Hours per week you could give to paid work</span>
+            <input name="hoursPerWeek" type="number" min="0" step="0.5" />
+          </label>
+          <div id="intents"></div>
+          <div id="open-questions"></div>
+          <div class="actions">
+            <button type="button" id="back-button" class="secondary">Back to the interview</button>
+            <button type="submit">Confirm and save</button>
+          </div>
+          <p class="error" role="alert"></p>
+        </form>
+      </section>
+
+      <section id="done" hidden>
+        <h1>Thank you</h1>
+        <p class="lede" id="done-summary"></p>
+        <p><a href="/">Start another interview</a></p>
+      </section>
+    </main>
+  </body>
+</html>

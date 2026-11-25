@@ -1,15 +1,18 @@
 {
-  "name": "village-lab",
+  "name": "open-lab",
   "version": "0.1.0",
   "private": true,
   "description": "Agent Lab: compares matching, bilateral negotiation and multi-party rooms on the same population",
   "type": "module",
   "scripts": {
     "lab": "tsx src/cli.ts",
+    "intake": "tsx src/intake/main.ts",
+    "intake:export": "tsx src/intake/export.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.14.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

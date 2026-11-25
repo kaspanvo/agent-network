@@ -3,7 +3,7 @@ import { Population, type Deal, type Proposal } from "../src/domain";
 import { evaluate, violations } from "../src/feasibility";
 import { indexPopulation } from "../src/population";
 
-function makeIndex({ migratorHours = 4, migratorMultiParty = true } = {}) {
+function makeIndex({ migratorHours = 4, migratorMultiParty = true, vendorBasis = "one-off" } = {}) {
   return indexPopulation(
     Population.parse({
       name: "test",
@@ -24,7 +24,17 @@ function makeIndex({ migratorHours = 4, migratorMultiParty = true } = {}) {
           reservationPrice: 50,
           blockers: [{ description: "won't migrate", resolvedBy: "migration" }],
         },
-        { id: "crm", principalId: "v", direction: "offer", status: "active", summary: "CRM", tag: "crm", reservationPrice: 45, incentiveBudget: 100 },
+        {
+          id: "crm",
+          principalId: "v",
+          direction: "offer",
+          status: "active",
+          summary: "CRM",
+          tag: "crm",
+          reservationPrice: 45,
+          priceBasis: vendorBasis,
+          incentiveBudget: 100,
+        },
         {
           id: "mig",
           principalId: "m",
@@ -92,6 +102,12 @@ describe("violations", () => {
   it("rejects multi-party rooms for principals whose mandate excludes them", () => {
     expect(violations(proposal([mainDeal, migrationDeal()]), makeIndex({ migratorMultiParty: false }))).toContain(
       "Migrator's mandate does not allow multi-party arrangements",
+    );
+  });
+
+  it("rejects deals that compare different price bases", () => {
+    expect(violations(proposal([mainDeal, migrationDeal()]), makeIndex({ vendorBasis: "per-month" }))).toContain(
+      "Vendor prices per-month but this deal is priced one-off",
     );
   });
 

@@ -29,6 +29,7 @@ export const Intent = z.object({
   tag: z.string(),
   // Seek: the most the principal will pay. Offer: the least they will accept. Private to their agent.
   reservationPrice: money,
+  priceBasis: z.enum(["one-off", "per-hour", "per-month"]).default("one-off"),
   hours: z.number().nonnegative().default(0),
   capacity: z.number().int().positive().default(1),
   // Offer only: what the provider will spend to win a deal, e.g. funding a seeker's blocker.

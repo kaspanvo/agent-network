@@ -3,12 +3,12 @@ import { describe, expect, it } from "vitest";
 import { participants, runExperiment, summarize } from "../src/experiment";
 import { indexPopulation, loadPopulation } from "../src/population";
 
-const idx = indexPopulation(loadPopulation(fileURLToPath(new URL("../fixtures/founding-village.json", import.meta.url))));
+const idx = indexPopulation(loadPopulation(fileURLToPath(new URL("../fixtures/founding-cohort.json", import.meta.url))));
 const runs = Object.fromEntries(runExperiment(idx).map((r) => [r.engine, r]));
 const bilateral = runs["B · bilateral"]!;
-const rooms = runs["Village · rooms"]!;
+const rooms = runs["C · rooms"]!;
 
-describe("engines on the founding-village fixture", () => {
+describe("engines on the founding-cohort fixture", () => {
   it("negotiating engines only produce proposals the checker accepts", () => {
     for (const run of [bilateral, rooms]) expect(run.verdicts.every((v) => v.status === "feasible")).toBe(true);
   });

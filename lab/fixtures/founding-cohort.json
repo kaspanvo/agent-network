@@ -1,6 +1,6 @@
 {
-  "name": "founding-village",
-  "description": "Hand-built smoke-test population. Each case exercises one mechanism (reciprocal trade, no zone of agreement, lexical false match, blocker resolution, unfillable seat). It is not evidence: replace with real elicited intents before drawing conclusions. Subscription prices are monthly; other prices are one-off.",
+  "name": "founding-cohort",
+  "description": "Hand-built smoke-test population. Each case exercises one mechanism (reciprocal trade, no zone of agreement, lexical false match, blocker resolution, unfillable seat). It is not evidence: replace with real elicited intents before drawing conclusions.",
   "synthetic": true,
   "principals": [
     { "id": "maya", "kind": "person", "name": "Maya" },
@@ -43,6 +43,7 @@
       "summary": "We pay $60 a month for our CRM. We'd switch to something equivalent that costs meaningfully less.",
       "tag": "crm-software",
       "reservationPrice": 50,
+      "priceBasis": "per-month",
       "blockers": [
         {
           "description": "We won't migrate our customer data ourselves",
@@ -59,6 +60,7 @@
       "summary": "Our CRM costs $45 a month, and we'll invest in acquiring the right small-business customers.",
       "tag": "crm-software",
       "reservationPrice": 45,
+      "priceBasis": "per-month",
       "capacity": 50,
       "incentiveBudget": 100
     },
@@ -138,6 +140,7 @@
       "summary": "Our card terminal fees are too high; we'd switch POS if someone handled the setup.",
       "tag": "pos-system",
       "reservationPrice": 80,
+      "priceBasis": "per-month",
       "blockers": [
         {
           "description": "Nobody on staff can set up the new menu and hardware",
@@ -154,6 +157,7 @@
       "summary": "Our POS is $60 a month with lower card fees; we'll fund onboarding for new cafés.",
       "tag": "pos-system",
       "reservationPrice": 60,
+      "priceBasis": "per-month",
       "capacity": 20,
       "incentiveBudget": 40
     }
