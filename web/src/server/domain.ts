@@ -98,6 +98,76 @@ export function formatPrice(amount: number, unit: Unit): string {
   return unit === "one-off" ? euros : `${euros}/${unit === "hour" ? "h" : "mo"}`;
 }
 
+// Something the agent learned about the person that isn't a deal or an interest: a level, a deadline, a reason.
+// Kept with the words it came from, private to the person's agent.
+export const AboutNote = z.object({ id: z.string(), fact: z.string().min(1).max(160), evidence: z.string().max(400), at: z.string() });
+export type AboutNote = z.infer<typeof AboutNote>;
+
+export type ProfileEntry = {
+  id: string;
+  summary: string;
+  // Worded for the person, e.g. "up to €15/h". Never shown to other agents. Null when not set or an interest.
+  limit: string | null;
+  missing: "price" | null;
+  times: string[];
+  format: "group" | "solo" | null;
+  top: boolean;
+  status: ProfileIntent["status"];
+  source: ProfileIntent["provenance"];
+  quote: string;
+  shared: string;
+};
+
+// The person's profile, built from what they've said so far. One structure, used by the panel, the API and the agent.
+export type Profile = {
+  name: string;
+  cameFor: string[];
+  lookingFor: ProfileEntry[];
+  offering: ProfileEntry[];
+  into: ProfileEntry[];
+  free: string[];
+  format: "group" | "solo" | null;
+  top: string | null;
+  about: AboutNote[];
+  // Inferred items waiting for a yes, and deals without a price yet.
+  toConfirm: number;
+  missing: number;
+};
+
+export function profileOf(input: { name: string; intents: ProfileIntent[]; goals?: string[]; about?: AboutNote[] }): Profile {
+  const live = input.intents.filter((i) => i.status !== "rejected");
+  const ranked = [...live].sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
+  const entry = (i: ProfileIntent): ProfileEntry => ({
+    id: i.id,
+    summary: i.summary,
+    limit: isInterest(i) || i.price === null ? null : `${i.direction === "seek" ? "up to" : "from"} ${formatPrice(i.price, i.unit)}`,
+    missing: !isInterest(i) && i.price === null ? "price" : null,
+    times: i.conditions,
+    format: i.prefers ?? null,
+    top: i.priority === 1,
+    status: i.status,
+    source: i.provenance,
+    quote: i.evidence,
+    shared: sharedLine(i),
+  });
+  const deals = ranked.filter((i) => !isInterest(i));
+  const formats = [...new Set(live.flatMap((i) => (i.prefers ? [i.prefers] : [])))];
+  const all = [...deals, ...ranked.filter(isInterest)].map(entry);
+  return {
+    name: input.name,
+    cameFor: input.goals ?? [],
+    lookingFor: deals.filter((i) => i.direction === "seek").map(entry),
+    offering: deals.filter((i) => i.direction === "offer").map(entry),
+    into: ranked.filter(isInterest).map(entry),
+    free: TIME_CONDITIONS.filter((t) => live.some((i) => i.conditions.includes(t))),
+    format: formats.length === 1 ? formats[0]! : null,
+    top: ranked.find((i) => i.priority === 1)?.summary ?? null,
+    about: input.about ?? [],
+    toConfirm: all.filter((e) => e.status === "pending").length,
+    missing: all.filter((e) => e.missing && e.status === "confirmed").length,
+  };
+}
+
 // What other agents are told about an intent. Never the price limit.
 export function sharedLine(intent: ProfileIntent): string {
   const times = intent.conditions.length ? `, ${intent.conditions.join(" or ")}` : "";

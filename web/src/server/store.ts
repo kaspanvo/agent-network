@@ -3,7 +3,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { allChecks } from "./audit";
 import { allDisclosures } from "./disclosure";
 import { isStale } from "./intake/profile";
-import type { ProfileIntent } from "./domain";
+import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
+import type { OpenMessage } from "./intake/openmodel";
 import type { Calibration } from "./intake/calibration";
 import type { ChatItem } from "./intake/types";
 import type { PageFacts } from "./tools/reader";
@@ -46,9 +47,14 @@ export type Session = {
   name: string;
   // Exact model history, appended to and never edited.
   history: Anthropic.Beta.BetaMessageParam[];
+  // The same for an open model on Workers AI, which speaks the OpenAI chat format.
+  openHistory?: OpenMessage[];
   // What the person sees in the conversation.
   chat: ChatItem[];
   intents: ProfileIntent[];
+  // What the person picked at the start ("Pay less for something"), and what the agent learned that isn't an intent.
+  goals?: string[];
+  about?: AboutNote[];
   ready: boolean;
   // Notes for the agent about things the person did outside the chat, sent with their next message.
   pendingNotes: string[];
@@ -105,6 +111,10 @@ export function publicSession(session: Session) {
     name: session.name,
     chat: session.chat,
     intents: session.intents,
+    goals: session.goals ?? [],
+    about: session.about ?? [],
+    // The structured profile, built from all of the above.
+    profile: profileOf(session),
     ready: session.ready,
     run: session.run,
     decisions: session.decisions,

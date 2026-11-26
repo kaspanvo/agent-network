@@ -1,5 +1,6 @@
 import { getAgentByName } from "agents";
 import { cookieOf, crossSite, handleApi } from "../src/server/api";
+import { agentModels } from "../src/server/models";
 import { isSessionId, SESSION_COOKIE } from "../src/server/store";
 
 export { PersonAgent } from "./person";
@@ -21,7 +22,8 @@ export default {
     const id = cookieOf(request, SESSION_COOKIE);
     if (!isSessionId(id) || (request.method === "DELETE" && url.pathname === "/api/session")) {
       // No agent yet, or leaving: nothing to wake.
-      return handleApi(request, { actor: undefined, start: () => { throw new Error("Start a session first."); } });
+      // Still answers which model runs agents, so the first screen says it truthfully.
+      return handleApi(request, { actor: undefined, agents: agentModels(undefined, env.AI), start: () => { throw new Error("Start a session first."); } });
     }
     const agent = await getAgentByName(env.PERSON_AGENT, id);
     return agent.fetch(request);

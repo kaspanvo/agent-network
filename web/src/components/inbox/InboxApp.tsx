@@ -317,7 +317,11 @@ export function InboxApp() {
             </button>
           </form>
           <p className="text-xs text-slate">
-            {mode === "claude" ? "Claude, Anthropic's AI, runs your agent." : "This is the demo agent: a fixed script, no AI model."} You see and approve everything it notes and agrees.
+            {mode === "claude"
+              ? "Claude, Anthropic's AI, runs your agent."
+              : mode === "open"
+                ? `${model ?? "An open model"}, an open model on Cloudflare Workers AI, runs your agent for now.`
+                : "This is the demo agent: a fixed script, no AI model."} You see and approve everything it notes and agrees.
           </p>
           {intake.error && (
             <p role="alert" className="text-sm text-signal-ink">
@@ -421,6 +425,8 @@ export function InboxApp() {
                 <AgentDetails
                   name={name}
                   intents={intake.intents}
+                  goals={intake.goals}
+                  about={intake.about}
                   ready={intake.ready}
                   threads={run.threads}
                   activeId={run.activeId}

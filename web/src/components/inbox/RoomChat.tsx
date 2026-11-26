@@ -14,11 +14,12 @@ const CHECK_INS: { answer: CheckIn; label: string }[] = [
   { answer: "missed", label: "It didn't happen" },
 ];
 
-const SUGGESTIONS = {
-  deal: ["Are the times flexible?", "Tell me more about them"],
-  circle: ["What's on this week?", "Anyone free on Saturday?"],
-  private: ["When are they usually free?", "What are they into?"],
-} as const;
+// Things the person might ask the other agents, naming who they're talking to.
+function starters(mode: Thread["mode"], who: string, grouped: boolean): string[] {
+  if (mode === "circle" || grouped) return mode === "circle" ? ["What's on this week?", "Anyone free on Saturday?"] : ["Are the times flexible?", "Who else is in this room?"];
+  if (mode === "private") return [`When is ${who} usually free?`, `What is ${who} into?`];
+  return [`Are ${who}'s times flexible?`, `Tell me more about ${who}`];
+}
 
 function CardView({ card, mine }: { card: Card; mine: boolean }) {
   if (card.kind === "offer")
@@ -454,7 +455,7 @@ export function RoomChat(props: {
             jump();
             props.onSay(text);
           }}
-          suggestions={youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : [...SUGGESTIONS[thread.mode]]}
+          suggestions={youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : starters(thread.mode, thread.who, !!thread.grouped)}
         />
       )}
     </section>

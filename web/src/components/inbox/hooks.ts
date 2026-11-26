@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { api } from "@/lib/client";
-import type { ProfileIntent } from "@/server/domain";
+import type { AboutNote, ProfileIntent } from "@/server/domain";
 import type { ChatItem, IntakeEvent } from "@/server/intake/types";
 import type { AgentEvent, CheckIn } from "@/server/negotiation/types";
 import type { PublicSession } from "@/server/store";
@@ -11,6 +11,8 @@ import { emptyRun, reduce, type RunState } from "./runState";
 export function useIntake() {
   const [chat, setChat] = useState<ChatItem[]>([]);
   const [intents, setIntents] = useState<ProfileIntent[]>([]);
+  const [goals, setGoals] = useState<string[]>([]);
+  const [about, setAbout] = useState<AboutNote[]>([]);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -19,6 +21,8 @@ export function useIntake() {
   const load = useCallback((session: PublicSession) => {
     setChat(session.chat);
     setIntents(session.intents);
+    setGoals(session.goals);
+    setAbout(session.about);
     setReady(session.ready);
   }, []);
 
@@ -37,6 +41,9 @@ export function useIntake() {
         return onItem(event.itemId, (m) => ({ ...m, suggestions: event.options }));
       case "intent":
         return setIntents((list) => (list.some((i) => i.id === event.intent.id) ? list.map((i) => (i.id === event.intent.id ? event.intent : i)) : [...list, event.intent]));
+      case "about":
+        setGoals(event.goals);
+        return setAbout(event.about);
       case "ready":
         return setReady(true);
       case "error":
@@ -77,7 +84,7 @@ export function useIntake() {
     }
   };
 
-  return { chat, intents, ready, busy, error, load, send, stop, decideIntent, setError };
+  return { chat, intents, goals, about, ready, busy, error, load, send, stop, decideIntent, setError };
 }
 
 export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void) {

@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "./env";
+import type { ChatModel, ChatResponse } from "./intake/openmodel";
 
 // Which model does which job. Kept in code, not in a router, so a change is reviewed like any other.
 //
@@ -59,4 +60,27 @@ export function claudeFor(role: Role): Anthropic {
       "cf-aig-max-attempts": "2",
     },
   });
+}
+
+// Without a Claude key, one open model on Cloudflare Workers AI does every job that needs a model, for everyone alike.
+// Qwen3.8 27B was the steadiest of the free-tier models at calling one tool per step and at suggesting replies that
+// answer its own question. Thinking is off: it halved the cost per turn without changing the replies.
+const DEFAULT_OPEN_MODEL = "@cf/qwen/qwen3.8-27b";
+export const OPEN_MODEL = {
+  model: env.OPEN_WORKERS_AI_MODEL ?? DEFAULT_OPEN_MODEL,
+  label: (env.OPEN_WORKERS_AI_MODEL ?? DEFAULT_OPEN_MODEL) === DEFAULT_OPEN_MODEL ? "Qwen3.8 27B" : (env.OPEN_WORKERS_AI_MODEL ?? "").split("/").at(-1)!,
+} as const;
+
+// The part of the Workers AI binding Open uses.
+export type AiBinding = { run(model: string, input: Record<string, unknown>): Promise<unknown> };
+
+// Each call logs its model, time, cost and which tools it called: never anything the person said.
+export function workersAiChat(ai: AiBinding): ChatModel {
+  return async (request) => {
+    const started = Date.now();
+    const response = (await ai.run(OPEN_MODEL.model, { ...request, chat_template_kwargs: { enable_thinking: false } })) as ChatResponse;
+    const calls = response.choices[0]?.message.tool_calls?.map((c) => c.function.name) ?? [];
+    console.log(JSON.stringify({ at: "workers-ai", model: OPEN_MODEL.model, ms: Date.now() - started, neurons: Math.round(response.usage?.neurons ?? 0), calls }));
+    return response;
+  };
 }

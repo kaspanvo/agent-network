@@ -7,7 +7,8 @@ import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
 import { jsonError, ndjson, rateLimited } from "./http";
 import { scoreCalibration } from "./intake/calibration";
 import { isReady, setIntentPrice } from "./intake/profile";
-import { openingMessage } from "./intake/prompt";
+import { OPENING_CHOICES, openingMessage } from "./intake/prompt";
+import { aboutEvent } from "./intake/tools";
 import { RECAP_CHANGE, RECAP_CONFIRMED, type IntakeEvent } from "./intake/types";
 import { localMarket, type Market } from "./market";
 import { agentModels, type Agents } from "./models";
@@ -190,6 +191,11 @@ async function intake(request: Request, host: Host) {
       if (picked.length === 0) return jsonError("Pick one of the options.", 400);
       session.chat.push({ id: randomUUID(), role: "user", text: picked.join(", ") });
       userText = `I picked: ${picked.join(", ")}`;
+      // The opening picks are what the person came for: they go in the profile as they are.
+      if (picked.every((p) => OPENING_CHOICES.includes(p))) {
+        session.goals = picked;
+        early.push(aboutEvent(session));
+      }
     } else if (input.kind === "number" && item.widget.kind === "number") {
       const { min, max, unit, intentId } = item.widget;
       const value = Math.min(max, Math.max(min, input.value));

@@ -8,6 +8,7 @@ import { guard, WITHHELD } from "../guard";
 import type { Session } from "../store";
 import { runStats } from "../negotiation/run";
 import type { AgentEvent, Card, RoomMode } from "../negotiation/types";
+import type { ChatModel } from "../intake/openmodel";
 
 type HappeningCard = Extract<Card, { kind: "happening" }>;
 export type RoomMember = { name: string; facts: string[]; happenings: { sentence: string; card: HappeningCard }[] };
@@ -216,6 +217,81 @@ export function claudeResponder(client: Anthropic = new Anthropic()): Responder 
         .filter((r) => names.has(r.name) && r.text.trim())
         .slice(0, 3);
       return replies.length ? replies : keywordResponder.reply(room, text);
+    },
+  };
+}
+
+// The same replies from an open model on Workers AI, for running without a Claude key. One required tool call carries
+// them, checked against the same schema; anything off falls back to the keyword replies.
+export function openModelResponder(model: ChatModel): Responder {
+  return {
+    async reply(room, text) {
+      try {
+        const response = await model({
+          messages: [
+            { role: "system", content: RESPONDER_PROMPT },
+            {
+              role: "user",
+              content: JSON.stringify({
+                person_using_the_app: room.you,
+                room_topic: room.topic,
+                agents: room.members.map((m) => ({ speaker: m.name, shared_facts: m.facts, happenings: m.happenings.map((h) => h.card.title) })),
+                recent_messages: room.recent,
+                new_message: text,
+              }),
+            },
+          ],
+          tools: [
+            {
+              type: "function",
+              function: {
+                name: "send_replies",
+                description: "Send the agents' replies to the room.",
+                parameters: {
+                  type: "object",
+                  properties: {
+                    replies: {
+                      type: "array",
+                      maxItems: 3,
+                      items: {
+                        type: "object",
+                        properties: {
+                          speaker: { type: "string" },
+                          move: { type: "string", enum: ["ANSWER", "SHARE", "PASS"] },
+                          text: { type: "string" },
+                          why: { type: "string" },
+                          attach_happening: { type: ["string", "null"] },
+                        },
+                        required: ["speaker", "move", "text", "why", "attach_happening"],
+                      },
+                    },
+                  },
+                  required: ["replies"],
+                },
+              },
+            },
+          ],
+          tool_choice: "required",
+          max_tokens: 1000,
+        });
+        const call = response.choices[0]?.message.tool_calls?.[0];
+        const raw = call ? (typeof call.function.arguments === "string" ? JSON.parse(call.function.arguments) : call.function.arguments) : null;
+        const parsed = Replies.safeParse(raw);
+        const names = new Set(room.members.map((m) => m.name));
+        const cardFor = (name: string, title: string | null) => room.members.find((m) => m.name === name)?.happenings.find((h) => h.card.title === title)?.card;
+        const replies: Reply[] = (parsed.success ? parsed.data.replies : [])
+          .map((r) => {
+            const name = r.speaker.replace(/'s agent$/, "");
+            const card = cardFor(name, r.attach_happening);
+            return { name, move: r.move, text: r.text, why: r.why, ...(card ? { card } : {}) };
+          })
+          .filter((r) => names.has(r.name) && r.text.trim())
+          .slice(0, 3);
+        if (replies.length) return replies;
+      } catch (err) {
+        console.warn("Open model unavailable for room replies:", err instanceof Error ? err.message : err);
+      }
+      return keywordResponder.reply(room, text);
     },
   };
 }

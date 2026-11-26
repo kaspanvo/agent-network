@@ -21,6 +21,8 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PersonAgent", "MarketAgent"] }],
   // Cloudflare Browser Run, for the read-only page reader.
   "browser": { "binding": "BROWSER" },
+  // Workers AI: an open model runs the agent when there's no Claude key. Calls are billed even from wrangler dev.
+  "ai": { "binding": "AI", "remote": true },
   "vars": {
     "OPEN_PACE": "1"
   },

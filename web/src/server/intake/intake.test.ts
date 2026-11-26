@@ -96,6 +96,24 @@ describe("demo intake agent", () => {
     expect(session.intents[0]!.prefers).toBe("group");
   });
 
+  it("answers a question instead of saving it, then goes back to what it asked with the same chips", async () => {
+    const { session } = await turn("[App note: start]");
+    const { events: asked } = await turn("I picked: Pay less for something", session);
+    const { events } = await turn("What can you actually do for me?", session);
+    expect(session.intents).toEqual([]);
+    expect(said(events)).toContain("Nothing is agreed without your yes");
+    expect(said(events)).toContain("back to you: What would you like to pay less for?");
+    expect(replies(events)).toEqual(replies(asked));
+  });
+
+  it("still takes a request that names something as an intent, and notes what helps", async () => {
+    const { session } = await turn("[App note: start]");
+    await turn("I picked: Learn something new", session);
+    await turn("Can you find me Spanish lessons? I'm a total beginner, with a trip in March.", session);
+    expect(session.intents.map((i) => i.tag)).toEqual(["spanish-lessons"]);
+    expect(session.about?.map((a) => a.fact)).toEqual(["Starting from scratch", "Trip coming up in March"]);
+  });
+
   it("treats typing instead of picking at the start as the person's own words", async () => {
     const { session } = await turn("[App note: start]");
     await turn("I'd love to learn Spanish", session);

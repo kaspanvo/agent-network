@@ -1,6 +1,6 @@
 "use client";
 
-import { formatPrice, isInterest, lowerFirst, sharedLine, type ProfileIntent, type Unit } from "@/server/domain";
+import { formatPrice, isInterest, lowerFirst, sharedLine, type AboutNote, type ProfileIntent, type Unit } from "@/server/domain";
 import type { Check } from "@/server/audit";
 import type { Opportunity } from "@/server/negotiation/types";
 import type { AgentMode } from "@/server/pace";
@@ -181,9 +181,11 @@ function ModelNote({ mode, model }: { mode: AgentMode | null; model: string | nu
   return (
     <section className="flex flex-col gap-1 rounded-2xl bg-paper p-3.5">
       <h3 className="font-mono text-[11px] tracking-wider text-slate">YOUR AGENT&apos;S MODEL</h3>
-      <span className="font-display text-lg">{mode === "claude" && model ? model : "Demo agent, no AI model"}</span>
+      <span className="font-display text-lg">{mode !== "demo" && model ? model : "Demo agent, no AI model"}</span>
       <span className="text-[13px] text-slate">
-        {mode === "claude"
+        {mode === "open"
+          ? "No Claude key is set, so an open model on Cloudflare Workers AI runs every agent in the pilot for now, the same model for everyone. If it's unavailable or today's free allowance runs out, the scripted agent takes over."
+          : mode === "claude"
           ? "Everything that speaks or decides for someone in this pilot runs on this model, at the same effort, so nobody's agent gets better deals by being stronger than yours. Smaller models only word what code already decided, or read a page you shared."
           : "Scripted replies. Every agent in the demo follows the same rules, so none has an edge."}
       </span>
@@ -194,6 +196,8 @@ function ModelNote({ mode, model }: { mode: AgentMode | null; model: string | nu
 export function AgentDetails(props: {
   name: string;
   intents: ProfileIntent[];
+  goals: string[];
+  about: AboutNote[];
   ready: boolean;
   threads: Thread[];
   activeId: string | null;
@@ -214,6 +218,8 @@ export function AgentDetails(props: {
       <AgentPanel
         name={props.name}
         intents={props.intents}
+        goals={props.goals}
+        about={props.about}
         ready={props.ready}
         onDecide={props.onDecide}
         footer={

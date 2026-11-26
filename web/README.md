@@ -33,6 +33,8 @@ The inbox works like a messaging app:
 - **Undo:** after **Approve** or **I'm in**, you have 8 seconds to undo before your agent tells anyone.
 - **Proposals are bound to what you asked for.** If you change the intent behind a proposal after it was agreed, it no longer stands; you can dismiss it and send your agent out again. A new version shows what changed since the last one.
 - **After a yes:** the others say yes for themselves, you're introduced by first name, and your agent sets a **check-in**: did it happen, and would you do it again? Your answer goes back to your agent.
+- **Your profile builds as you talk.** The profile panel sorts what you've said into sections: what you came for (your opening picks), what you're looking for, what you could offer, what you're into, when you're free and how you like things done, and anything else your agent noted (a level, a deadline, a reason), each with your own words. Limits show as "up to €15/h · private"; anything inferred waits for your yes; a deal without a price says so. It's one structure (`profileOf` in `src/server/domain.ts`), returned by the API as `profile`.
+- **Ask your agent anything.** A question ("what can you do?", "who sees this?") gets a short answer, isn't saved as something you want, and the agent goes back to what it asked, bringing back any slider or options that were waiting. Suggested replies always answer the agent's own question; replies that ask something back are dropped.
 - **What your agent knows:** the profile panel splits what your agent shares in rooms from what it keeps to itself, shows how many of your picks it guessed, and lets you make it forget an intent.
 - **Activity log:** the profile panel lists everything your agent did in your name, including what it said and to whom. Each entry is hash-chained to the one before, so any later edit shows. It also says which model runs every agent; it's the same for everyone, so no one gets better deals by having a stronger agent.
 - **Steering:** "Change my limit" reopens the room at your new limit. The agents bargain again in the same chat. If they agree, the proposal becomes version N+1 and any earlier approval is cleared, so you always approve exact terms. If they don't, the previous version still stands.
@@ -48,17 +50,23 @@ npm install
 npm run dev            # http://localhost:3000
 ```
 
-With no Claude credentials set, the app runs a **demo agent**: a scripted interviewer and scripted negotiation messages. The header shows "DEMO AGENT" so nobody mistakes it for the real thing. To use Claude:
+Which model runs the agents, in order:
+
+1. **Claude**, when a Claude key is set (below).
+2. **An open model on Cloudflare Workers AI** (`@cf/qwen/qwen3.8-27b`), when there's no key and the Worker has the `AI` binding. That's the case on Cloudflare and in `npm run dev:cf`, where calls go to Cloudflare and count against the account's Workers AI allowance. The header shows "OPEN MODEL". It runs the setup conversation and the room replies; the scripted narrator words the negotiation. If a call fails, or the free daily allowance runs out, the script takes that turn and the conversation carries on.
+3. **A demo agent**: a scripted interviewer and scripted negotiation messages, with "DEMO AGENT" in the header. This is what `npm run dev` runs without a key.
+
+To use Claude:
 
 ```bash
 export ANTHROPIC_API_KEY=...   # then restart npm run dev
 ```
 
-`OPEN_AGENT_MODE=claude|demo` forces a mode. `OPEN_PACE=0.3` speeds up the live negotiation (0 turns pauses off).
+`OPEN_AGENT_MODE=claude|open|demo` forces a mode, and `OPEN_WORKERS_AI_MODEL` picks another Workers AI model. `OPEN_PACE=0.3` speeds up the live negotiation (0 turns pauses off).
 
 ## On Cloudflare
 
-Live at **https://open.viral-trends.workers.dev**, on the same Cloudflare account as the other projects. It runs in demo mode until a Claude key is set (below).
+Live at **https://open.viral-trends.workers.dev**, on the same Cloudflare account as the other projects. Until a Claude key is set (below), its agents run on an open model on Workers AI.
 
 ```
 browser ──▶ Worker "open" (worker/index.ts)
@@ -69,6 +77,7 @@ browser ──▶ Worker "open" (worker/index.ts)
                                               ├─ RPC ──▶ MarketAgent (Durable Object; one per community)
                                               │            the only place sealed limits are compared
                                               ├─ BROWSER ─▶ Cloudflare Browser Run (read-only page reader)
+                                              ├─ AI ──────▶ Workers AI (open model, when there's no Claude key)
                                               └─ fetch ──▶ Claude, directly or through AI Gateway
 ```
 
@@ -91,7 +100,7 @@ The same API code runs in both places: `src/server/api.ts` takes a standard `Req
 
 | Piece | Where | What it does |
 | --- | --- | --- |
-| Setup conversation | `src/server/intake/` | Claude (`claude-opus-5-5`) interviews the person and acts through tools: `show_choices` and `ask_number` render tappable options and sliders in the chat, `save_intent` records each intent as **stated** or **inferred** (inferred ones wait for the person to confirm), and `mark_ready` unlocks sending the agent out. Replies stream token by token. |
+| Setup conversation | `src/server/intake/` | Claude (`claude-opus-5-5`), or the open model without a key, interviews the person and acts through the same tools (`intake/tools.ts`): `show_choices` and `ask_number` render tappable options and sliders in the chat, `save_intent` records each intent as **stated** or **inferred** (inferred ones wait for the person to confirm), and `mark_ready` unlocks sending the agent out. Replies stream token by token. |
 | Negotiation | `src/server/negotiation/` | A deterministic engine finds matching members, checks times and price units, opens a group **room** when a group rate makes a deal possible, and settles price by **sealed offers**: each agent sends its person's limit to Open's matcher, which picks a random point inside the overlap. Claude only writes the words. `renegotiate.ts` (`POST /api/rooms/[id]/renegotiate`) re-runs one room at a new limit and issues the next proposal version. |
 | Market | `src/server/market.ts`, `worker/market.ts` | Matching runs behind a `Market` interface. It returns plans with every other member's limit removed, so a person's agent never holds anyone else's number. On Cloudflare it's its own Durable Object per community. |
 | Models | `src/server/roles.ts`, `src/server/models.ts` | Which model does which job. Everything that speaks or decides for a person (setup, replies in rooms) runs on Claude Opus 5.5 at the same effort for every member; the narrator, which only words what code already decided, runs on Haiku 5.5; the page reader on Sonnet 5.5. |
@@ -154,5 +163,6 @@ Coordination follows what agent task boards converged on (Vercel Board, coord, s
 - The other members are simulated and say yes at once. Approvals are recorded per person and introductions already wait for all of them, but real members answering on their own time needs the room's approvals kept in the market object, where each member's agent can write its own.
 - Idempotency keys on answers and holds: today a repeated request is refused (409) rather than replayed.
 - An interactive browser (clicking, filtering) for the agent. Only reading is built; anything that acts on a page would need the person's approval first.
+- The open model is a stopgap. Each turn costs about 150 to 250 Workers AI neurons, so the 10,000 free a day cover roughly 50 turns, a handful of setups. Past that, Workers Paid bills $0.011 per 1,000 neurons; on the Free plan the script takes over until the allowance resets at 00:00 UTC. It's also slower than Claude (2 to 20 seconds a turn), and the first call can be slower still.
 - AI Gateway isn't created yet: Wrangler can't create one, so it's a dashboard step (above).
 - Shareable seat links, the organizer view, and the Mixer report from the designs.

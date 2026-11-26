@@ -12,7 +12,7 @@ import { browserRunSource } from "./browser";
 const COMMUNITY = "lisbon-pilot";
 
 // What's kept, split so no single row gets near SQLite's 2 MB limit: the model history and the run grow; the rest stays small.
-type Part = "core" | "history" | "run";
+type Part = "core" | "history" | "open_history" | "run";
 
 // One person's agent, as a Durable Object built on Cloudflare's Agents SDK. Everything private to the person
 // (their limits, their conversation, their run, their log) lives in this object's own SQLite storage and
@@ -26,13 +26,18 @@ export class PersonAgent extends Agent<Env> {
     const rows = this.sql<{ part: Part; value: string }>`SELECT part, value FROM session_parts`;
     if (rows.length === 0) return;
     const parts = Object.fromEntries(rows.map((r) => [r.part, JSON.parse(r.value)])) as Record<Part, unknown>;
-    const session = { ...(parts.core as Session), history: (parts.history ?? []) as Session["history"], run: (parts.run ?? null) as Session["run"] };
+    const session = {
+      ...(parts.core as Session),
+      history: (parts.history ?? []) as Session["history"],
+      openHistory: (parts.open_history ?? []) as NonNullable<Session["openHistory"]>,
+      run: (parts.run ?? null) as Session["run"],
+    };
     this.actor = makeActor(upgradeSession(session), (s) => this.save(s));
   }
 
   private save(session: Session) {
-    const { history, run, ...core } = session;
-    const parts: [Part, unknown][] = [["core", core], ["history", history], ["run", run]];
+    const { history, openHistory, run, ...core } = session;
+    const parts: [Part, unknown][] = [["core", core], ["history", history], ["open_history", openHistory ?? []], ["run", run]];
     for (const [part, value] of parts) void this.sql`INSERT OR REPLACE INTO session_parts (part, value) VALUES (${part}, ${JSON.stringify(value)})`;
   }
 
@@ -52,7 +57,7 @@ export class PersonAgent extends Agent<Env> {
         return this.actor;
       },
       market: this.market(),
-      agents: agentModels(browserRunSource(this.env.BROWSER)),
+      agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI),
       // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,
       // even if nobody has the page open.
       wake: (job, at) => {

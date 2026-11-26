@@ -1,4 +1,4 @@
-import type { ProfileIntent } from "../domain";
+import type { AboutNote, ProfileIntent } from "../domain";
 import type { Session } from "../store";
 
 // One line of the recap: what the agent will look for, what stays private, and what other agents will hear.
@@ -46,6 +46,8 @@ export type IntakeEvent =
   | { type: "activity"; itemId: string; text: string }
   | { type: "suggestions"; itemId: string; options: string[] }
   | { type: "intent"; intent: ProfileIntent }
+  // The rest of the profile: what they picked at the start and what the agent noted about them.
+  | { type: "about"; goals: string[]; about: AboutNote[] }
   | { type: "ready" }
   | { type: "read"; url: string; title: string }
   | { type: "error"; message: string }

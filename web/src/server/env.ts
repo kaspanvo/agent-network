@@ -2,7 +2,10 @@ import { z } from "zod";
 
 // Every setting the server reads, checked once at startup so a typo fails loudly instead of silently changing behaviour.
 const Env = z.object({
-  OPEN_AGENT_MODE: z.enum(["claude", "demo"]).optional(),
+  // claude: Claude through the API. open: an open model on Cloudflare Workers AI (needs the AI binding). demo: a fixed script.
+  OPEN_AGENT_MODE: z.enum(["claude", "open", "demo"]).optional(),
+  // Which Workers AI model the open mode uses.
+  OPEN_WORKERS_AI_MODEL: z.string().regex(/^@(cf|hf)\//).optional(),
   OPEN_PACE: z.coerce.number().min(0).max(10).default(1),
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   ANTHROPIC_AUTH_TOKEN: z.string().min(1).optional(),

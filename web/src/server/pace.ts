@@ -6,10 +6,13 @@ export function pause(ms: number): Promise<void> {
   return wait > 0 ? new Promise((resolve) => setTimeout(resolve, wait)) : Promise.resolve();
 }
 
-export type AgentMode = "claude" | "demo";
+export type AgentMode = "claude" | "open" | "demo";
 
-export function agentMode(): AgentMode {
+// Claude when there's a key; otherwise an open model on Workers AI when the Worker has the AI binding; otherwise the script.
+export function agentMode(hasOpenModel = false): AgentMode {
+  if (env.OPEN_AGENT_MODE === "open") return hasOpenModel ? "open" : "demo";
   if (env.OPEN_AGENT_MODE) return env.OPEN_AGENT_MODE;
   // A key in the app, or one stored in Cloudflare AI Gateway.
-  return env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || (env.OPEN_AI_GATEWAY_URL && env.OPEN_AI_GATEWAY_BYOK === "true") ? "claude" : "demo";
+  if (env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN || (env.OPEN_AI_GATEWAY_URL && env.OPEN_AI_GATEWAY_BYOK === "true")) return "claude";
+  return hasOpenModel ? "open" : "demo";
 }
