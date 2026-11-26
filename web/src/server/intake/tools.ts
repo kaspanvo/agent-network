@@ -84,7 +84,7 @@ export const TOOL_SPECS: ToolSpec[] = [
           description: "deal: something bought, sold or paid for, negotiated on price. interest: something to do or share with other people, like music, running or games. Interests have no price.",
         },
         direction: { type: "string", enum: ["seek", "offer"] },
-        summary: { type: "string", description: "Short, in their words, e.g. Learn Spanish before a trip in March" },
+        summary: { type: "string", description: "Short, in their words, e.g. Learn Spanish before a trip in March. Other agents hear it, so never an amount: the price goes in price." },
         tag: { type: "string", description: "kebab-case category" },
         provenance: { type: "string", enum: ["stated", "inferred"] },
         evidence: { type: "string", description: "Their exact words this comes from" },

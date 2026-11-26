@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Loggable } from "./activity";
 import { allow, broadcast, finish, observe, persist, type Actor } from "./actor";
+import { limitBehind } from "./limits";
 import type { AgentEvent } from "./negotiation/types";
 
 export function jsonError(message: string, status: number): Response {
@@ -13,6 +14,8 @@ export function rateLimited(actor: Actor): Response | null {
 }
 
 function friendly(err: unknown): string {
+  const limit = limitBehind(err);
+  if (limit) return limit.message;
   if (err instanceof Anthropic.AuthenticationError) return "Claude rejected the API key. Check ANTHROPIC_API_KEY and restart the server.";
   if (err instanceof Anthropic.RateLimitError) return "Claude is busy right now. Wait a moment and try again.";
   if (err instanceof Anthropic.APIError) return `Claude returned an error (${err.status}). Try again.`;

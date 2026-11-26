@@ -68,6 +68,8 @@ export type Session = {
   // Public pages the agent read for the person, with the facts it took from each.
   sources?: PageFacts[];
   followups: Record<string, { stage: "introduced" | "done"; answer?: CheckIn; dueAt?: string; asked?: boolean }>;
+  // Today's use against the person's daily quotas.
+  usage?: { day: string; counts: Partial<Record<string, number>> };
 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;
@@ -102,6 +104,8 @@ export function upgradeSession(session: Session): Session {
   session.log ??= [];
   session.followups ??= {};
   session.recapConfirmed ??= session.ready;
+  // Sessions saved while confirming an inferred intent could leave the agent ready with the recap unchecked.
+  if (!session.recapConfirmed) session.ready = false;
   return session;
 }
 

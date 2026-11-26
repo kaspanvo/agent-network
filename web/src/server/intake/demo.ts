@@ -141,7 +141,9 @@ function needsFormat(session: Session): ProfileIntent | undefined {
 
 export function demoIntakeAgent(reader?: Reader): IntakeAgent {
   return {
-    async respond(session: Session, userText: string, emit: (event: IntakeEvent) => void, signal: AbortSignal) {
+    async respond(session: Session, said: string, emit: (event: IntakeEvent) => void, signal: AbortSignal) {
+      // Notes from the app ride along with what the person said; the script reads only the person's own words.
+      const userText = said.replace(/\[App note:[^\]]*\]\s*/g, "").trim();
       const itemId = randomUUID();
       const item: ChatItem = { id: itemId, role: "agent", text: "" };
       const previous = session.chat.filter((c) => c.role === "agent").at(-1);
@@ -272,7 +274,7 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
         const ideas: [string, string][] = [["running", "I'm into running"], ["board-games", "Board games, any night"], ["used-camera", "My camera sits in a drawer"], ["spanish-lessons", "I'd love to learn Spanish"], ["live-music", "I'm into jazz and live music"], ["dog-sitting", "Someone to mind my dog on weekends"]];
         suggest(ideas.filter(([tag]) => !have.has(tag)).slice(0, 3).map(([, text]) => text));
         return;
-      } else if ((!answered || answered.kind === "recap") && !SKIP.test(userText.trim())) {
+      } else if ((!answered || answered.kind === "recap") && userText && !SKIP.test(userText.trim())) {
         for (const fact of notesFrom(session, userText)) note(`Noted · ${fact}`);
         if (session.about?.length) emit(aboutEvent(session));
         const deals = DEALS.filter((t) => t.match.test(userText)).filter((t, n, all) => all.findIndex((x) => x.tag === t.tag) === n);
@@ -312,6 +314,13 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
         ]
           .filter(Boolean)
           .join(" ");
+      }
+
+      // The app asked for the recap again (the person changed something after checking it): go straight to it.
+      if (/Show the recap again/.test(said) && !userText && isReady(session) && !session.recapConfirmed) {
+        await say("You changed what I'll look for, so here it is again. Did I get it right?");
+        show(recapWidget(session));
+        return;
       }
 
       const seek = firstUnpriced(session, "seek");

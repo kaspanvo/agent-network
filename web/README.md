@@ -74,6 +74,7 @@ browser ──▶ Worker "open" (worker/index.ts)
              └─ /api/*  session cookie ──▶ PersonAgent  (Durable Object, Agents SDK; one per person)
                                               │  private state in its own SQLite: limits, chat, run, log
                                               │  check-in alarms via this.schedule()
+                                              ├─ RPC ──▶ Budget (Durable Object; one for the service: daily spend caps)
                                               ├─ RPC ──▶ MarketAgent (Durable Object; one per community)
                                               │            the only place sealed limits are compared
                                               ├─ BROWSER ─▶ Cloudflare Browser Run (read-only page reader)
@@ -93,6 +94,30 @@ npx wrangler secret put ANTHROPIC_API_KEY
 ```
 
 or, so the Worker holds no key at all, store the Anthropic key in an AI Gateway (dashboard → AI → AI Gateway → create `open` → Provider keys) and set these Worker variables: `OPEN_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<account id>/open/anthropic` and `OPEN_AI_GATEWAY_BYOK=true` (plus the secret `CF_AIG_TOKEN` if the gateway requires authentication). Every call is then logged, retried and tagged with its role (`cf-aig-metadata`), never with anything about the person.
+
+### Limits and cost controls
+
+Everything that costs money has a ceiling, in layers, the way metered AI platforms do it (`src/server/limits.ts`, `worker/budget.ts`):
+
+| Layer | What it stops | Default |
+| --- | --- | --- |
+| Edge rate limits per address (Workers Rate Limiting binding) | floods and scripts hammering the API, before any agent wakes | 120 API requests a minute; 3 new sessions a minute |
+| Bot check on new sessions (Cloudflare Turnstile) | bots starting agents, each with a fresh quota | off until set up (below) |
+| New sessions per address per day (hashed with the day; no address is stored) | one machine starting many agents | 5 (`OPEN_SESSIONS_PER_IP`) |
+| New sessions per day, for everyone | a crowd or botnet past the per-address limits | 300 (`OPEN_DAILY_SESSIONS`) |
+| Daily budget for the whole service, in one `Budget` Durable Object, reset at 00:00 UTC | the bill: past it, the paid models stop and the script answers until the next day | 9,000 Workers AI neurons (`OPEN_DAILY_NEURONS`, inside the free 10,000, so nothing is billed unless raised); 1,000 Claude requests (`OPEN_DAILY_CLAUDE_CALLS`); 200 page reads (`OPEN_DAILY_PAGE_READS`) |
+| Each person's daily quota | one person, or a bot that got in, using everyone's budget | 80 turns with their agent, 6 runs, 40 room messages, 10 limit changes, 10 private rooms |
+| Every call | one call running away | output-token caps, at most 6 tool steps per turn, 45 s timeout on Workers AI, 90 s and at most 2 retries on Claude, 64 KB request bodies, 2,000-character messages |
+
+A warning is logged once a day when a budget passes 80%. Each Workers AI call logs its model, time, neurons and tool names, never anything the person said.
+
+Settings and dashboard steps:
+
+- **Turn on the bot check:** in the dashboard, Turnstile → Add widget for `open.viral-trends.workers.dev` (managed mode). Set the Worker variables `OPEN_TURNSTILE_SITE_KEY=<site key>` and `TURNSTILE_HOSTNAMES=open.viral-trends.workers.dev` (never `localhost` in production), and store the secret with `npx wrangler secret put TURNSTILE_SECRET`. The check fails closed: a missing token, the wrong action or hostname, or siteverify being unreachable all refuse the new session.
+- **Allow paid Workers AI usage:** raise `OPEN_DAILY_NEURONS` (each 1,000 above the free 10,000 costs $0.011 on Workers Paid).
+- **Kill switch:** set `OPEN_AGENT_MODE=demo` on the Worker and every agent runs on the script, with no model calls at all.
+- **Logs and a gateway rate limit:** set `OPEN_WORKERS_AI_GATEWAY=<gateway id>` to route Workers AI calls through an AI Gateway, where a rate limit and logs can be set in the dashboard on top of Open's own.
+- **Provider-side hard caps:** turn on Cloudflare's usage-based billing notifications (Notifications → Billing), and when a Claude key is in use, set a monthly spend limit on the Anthropic workspace that holds it. Those caps hold even if Open's own code has a bug.
 
 The same API code runs in both places: `src/server/api.ts` takes a standard `Request` and a host. Locally the host is a registry in the Next.js process (`src/server/local/`); on Cloudflare it's the person's Durable Object (`worker/person.ts`).
 
@@ -163,6 +188,8 @@ Coordination follows what agent task boards converged on (Vercel Board, coord, s
 - The other members are simulated and say yes at once. Approvals are recorded per person and introductions already wait for all of them, but real members answering on their own time needs the room's approvals kept in the market object, where each member's agent can write its own.
 - Idempotency keys on answers and holds: today a repeated request is refused (409) rather than replayed.
 - An interactive browser (clicking, filtering) for the agent. Only reading is built; anything that acts on a page would need the person's approval first.
-- The open model is a stopgap. Each turn costs about 150 to 250 Workers AI neurons, so the 10,000 free a day cover roughly 50 turns, a handful of setups. Past that, Workers Paid bills $0.011 per 1,000 neurons; on the Free plan the script takes over until the allowance resets at 00:00 UTC. It's also slower than Claude (2 to 20 seconds a turn), and the first call can be slower still.
+- The edge rate limits are counted per Cloudflare location, so they're a flood guard rather than an exact count; the exact caps are the daily ones in the `Budget` object. One `Budget` object serves everyone, which is fine for a pilot; at large scale it would be split by counter.
+- The bot check needs its Turnstile widget created in the dashboard (above) before it switches on.
+- The open model is a stopgap. Each turn costs about 150 to 250 Workers AI neurons, so the daily budget of 9,000 covers roughly 40 turns, a handful of setups; past it the script answers until 00:00 UTC. It's also slower than Claude (2 to 20 seconds a turn), and the first call can be slower still.
 - AI Gateway isn't created yet: Wrangler can't create one, so it's a dashboard step (above).
 - Shareable seat links, the organizer view, and the Mixer report from the designs.

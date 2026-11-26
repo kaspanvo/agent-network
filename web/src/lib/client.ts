@@ -3,19 +3,32 @@ import type { AgentEvent, CheckIn } from "@/server/negotiation/types";
 import type { AgentMode } from "@/server/pace";
 import type { PublicSession } from "@/server/store";
 
-export type SessionResponse = { mode: AgentMode; model: string | null; busy: string | null; session: PublicSession | null };
+// `turnstile` is the site key when starting a session needs Cloudflare's bot check.
+export type SessionResponse = { mode: AgentMode; model: string | null; busy: string | null; turnstile: string | null; session: PublicSession | null };
+
+// A refusal from the server: its words for the person, and `needs` when the app can fix it itself ("recap").
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly needs?: string,
+  ) {
+    super(message);
+  }
+}
+
+async function refusal(response: Response): Promise<ApiError> {
+  const body = (await response.json().catch(() => ({}))) as { error?: string; needs?: string };
+  return new ApiError(body.error ?? `Request failed (${response.status})`, response.status, body.needs);
+}
 
 async function json<T>(response: Response): Promise<T> {
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error((body as { error?: string }).error ?? `Request failed (${response.status})`);
-  return body as T;
+  if (!response.ok) throw await refusal(response);
+  return (await response.json().catch(() => ({}))) as T;
 }
 
 async function* lines<E>(response: Response): AsyncGenerator<E> {
-  if (!response.ok || !response.body) {
-    const body = await response.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `Request failed (${response.status})`);
-  }
+  if (!response.ok || !response.body) throw await refusal(response);
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let buffer = "";
   for (;;) {
@@ -66,7 +79,7 @@ async function* follow(after: number): AsyncGenerator<AgentEvent> {
 export const api = {
   follow: (after: number) => Promise.resolve(follow(after)),
   session: () => fetch("/api/session", { cache: "no-store" }).then(json<SessionResponse>),
-  start: (name: string) => post("/api/session", { name }).then(json<SessionResponse>),
+  start: (name: string, turnstile?: string) => post("/api/session", { name, ...(turnstile ? { turnstile } : {}) }).then(json<SessionResponse>),
   reset: () => fetch("/api/session", { method: "DELETE" }).then(json<{ ok: true }>),
   intake: (input: unknown, signal?: AbortSignal) =>
     fetch("/api/intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal }).then((r) => lines<IntakeEvent>(r)),
@@ -74,7 +87,7 @@ export const api = {
   say: (threadId: string, text: string) => post(`/api/rooms/${threadId}/messages`, { text }).then((r) => lines<AgentEvent>(r)),
   openPrivate: (name: string) => post("/api/rooms/private", { name }).then((r) => lines<AgentEvent>(r)),
   setIntent: (id: string, status: "confirmed" | "rejected") =>
-    post(`/api/intents/${id}`, { status }, "PATCH").then(json<{ intents: PublicSession["intents"]; ready: boolean }>),
+    post(`/api/intents/${id}`, { status }, "PATCH").then(json<{ intents: PublicSession["intents"]; ready: boolean; recapNeeded: boolean }>),
   run: () => fetch("/api/agent/run", { method: "POST" }).then((r) => lines<AgentEvent>(r)),
   // `version` is the version on screen: if the proposal changed since, the server refuses rather than apply the answer to new terms.
   decide: (id: string, decision: "approved" | "declined", version?: number) => post(`/api/opportunities/${id}`, { decision, version }).then((r) => lines<AgentEvent>(r)),

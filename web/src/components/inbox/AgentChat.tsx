@@ -276,6 +276,12 @@ export function AgentChat(props: {
               </div>
             )}
 
+            {run.error && !sentOut && (
+              <p role="alert" className="rounded-xl bg-signal-soft px-4 py-3 text-sm text-signal-ink sm:ml-11">
+                Your agent couldn&apos;t go out: {run.error}
+              </p>
+            )}
+
             {ready && !sentOut && !busy && <PlanCard intents={intents} understanding={props.understanding} onSend={props.onSendOut} onChange={() => sendText("I want to change something.")} />}
 
             {sentOut && (

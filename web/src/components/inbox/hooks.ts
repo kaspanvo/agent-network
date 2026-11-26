@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { api } from "@/lib/client";
+import { api, ApiError } from "@/lib/client";
 import type { AboutNote, ProfileIntent } from "@/server/domain";
 import type { ChatItem, IntakeEvent } from "@/server/intake/types";
 import type { AgentEvent, CheckIn } from "@/server/negotiation/types";
@@ -74,17 +74,22 @@ export function useIntake() {
 
   const stop = () => abort.current?.abort();
 
+  // Asks the agent to show the recap again, without a message from the person.
+  const refresh = () => send({ kind: "refresh" });
+
   const decideIntent = async (id: string, status: "confirmed" | "rejected") => {
     try {
       const result = await api.setIntent(id, status);
       setIntents(result.intents);
       setReady(result.ready);
+      // The recap was already checked, so what changed needs checking too before the agent can go out.
+      if (result.recapNeeded) await refresh();
     } catch (err) {
       setError((err as Error).message);
     }
   };
 
-  return { chat, intents, goals, about, ready, busy, error, load, send, stop, decideIntent, setError };
+  return { chat, intents, goals, about, ready, busy, error, load, send, stop, decideIntent, refresh, setError };
 }
 
 export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void) {
@@ -99,7 +104,8 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
     if (session.run) setRun(session.run.events.reduce(reduce, emptyRun));
   }, []);
 
-  const stream = async (events: Promise<AsyncGenerator<AgentEvent | { type: "done" }>>, room: string | null = null) => {
+  // Returns what the server said it needs first ("recap"), when it refused for a reason the app can fix itself.
+  const stream = async (events: Promise<AsyncGenerator<AgentEvent | { type: "done" }>>, room: string | null = null): Promise<string | undefined> => {
     setRunning(true);
     setBusyRoom(room);
     try {
@@ -110,11 +116,13 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
         onEvent?.(event);
       }
     } catch (err) {
+      if (err instanceof ApiError && err.needs) return err.needs;
       setRun((s) => ({ ...s, error: (err as Error).message }));
     } finally {
       setRunning(false);
       setBusyRoom(null);
     }
+    return undefined;
   };
 
   // The page was reopened while the agent was out: pick the run up live from where the saved events end.
@@ -133,7 +141,7 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
   const start = async () => {
     setRun(emptyRun);
     setDecisions({});
-    await stream(api.run());
+    return stream(api.run());
   };
 
   const renegotiate = async (threadId: string, limit: number) => {

@@ -20,6 +20,24 @@ export const SaveIntentInput = z.object({
 });
 export type SaveIntentInput = z.infer<typeof SaveIntentInput>;
 
+// Amounts with a currency or a rate ("up to 15€/hour", "€300", "20 euros per lesson", "max 15/h"), with the word that leads into them.
+const AMOUNT =
+  /(?:\b(?:up to|max(?:imum)?|at most|under|below|around|about|roughly|from|at least|min(?:imum)?|for|budget(?: of)?)\s+)?(?:[€$£]\s?\d+(?:[.,]\d+)?(?:\s?k)?|\d+(?:[.,]\d+)?(?:\s?k)?\s?(?:€|\$|£|eur(?:os?)?\b|usd\b|dollars?\b|pounds?\b)|\b\d+(?:[.,]\d+)?(?=\s?(?:\/|per\s)\s?(?:h|hr|hour|month|mo|session|lesson|night)\b))(?:\s?(?:\/|per\s)\s?(?:h|hr|hour|month|mo|session|lesson|night)\b)?/gi;
+
+// A summary is what other agents hear about an intent, so it never carries an amount: the limit has its own private
+// field. Models sometimes write "Learn Spanish, up to 15€/hour" anyway; the amount is taken out here, in code.
+export function withoutAmounts(summary: string): string {
+  const cleaned = summary
+    .replace(AMOUNT, "")
+    .replace(/\s*[,;:]\s*(?=[,;:]|$)/g, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([,;.])/g, "$1")
+    .replace(/[,;:\s]+$/g, "")
+    .trim();
+  return cleaned || summary.trim();
+}
+
 export function normalizeTag(tag: string): string {
   return tag.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
@@ -43,7 +61,7 @@ export function saveIntent(session: Session, input: SaveIntentInput): ProfileInt
     kind: input.kind ?? existing?.kind ?? "deal",
     direction: input.direction,
     tag: normalizeTag(input.tag) || "other",
-    summary: input.summary,
+    summary: withoutAmounts(input.summary),
     price: input.price !== undefined ? input.price : (existing?.price ?? null),
     unit: input.unit ?? existing?.unit ?? "one-off",
     conditions: input.conditions ? cleanConditions(input.conditions) : (existing?.conditions ?? []),

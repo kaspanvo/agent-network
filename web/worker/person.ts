@@ -7,6 +7,7 @@ import type { Market } from "../src/server/market";
 import { agentModels } from "../src/server/models";
 import { createSession, upgradeSession, type Session } from "../src/server/store";
 import { browserRunSource } from "./browser";
+import { budgetCounter } from "./budget";
 
 // The community whose market this agent matches in.
 const COMMUNITY = "lisbon-pilot";
@@ -41,6 +42,11 @@ export class PersonAgent extends Agent<Env> {
     for (const [part, value] of parts) void this.sql`INSERT OR REPLACE INTO session_parts (part, value) VALUES (${part}, ${JSON.stringify(value)})`;
   }
 
+  // The service's daily budget, shared by every person's agent.
+  private get counter() {
+    return budgetCounter(this.env.BUDGET);
+  }
+
   private market(): Market {
     const stub = this.env.MARKET.getByName(COMMUNITY);
     return { match: (intents) => stub.match(intents) };
@@ -57,7 +63,8 @@ export class PersonAgent extends Agent<Env> {
         return this.actor;
       },
       market: this.market(),
-      agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI),
+      counter: this.counter,
+      agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI, this.counter),
       // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,
       // even if nobody has the page open.
       wake: (job, at) => {

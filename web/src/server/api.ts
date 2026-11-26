@@ -10,6 +10,7 @@ import { isReady, setIntentPrice } from "./intake/profile";
 import { OPENING_CHOICES, openingMessage } from "./intake/prompt";
 import { aboutEvent } from "./intake/tools";
 import { RECAP_CHANGE, RECAP_CONFIRMED, type IntakeEvent } from "./intake/types";
+import { DAILY, localCounter, spend, today, type Counter, type QuotaKind } from "./limits";
 import { localMarket, type Market } from "./market";
 import { agentModels, type Agents } from "./models";
 import { renegotiate } from "./negotiation/renegotiate";
@@ -17,6 +18,7 @@ import { runAgent } from "./negotiation/run";
 import type { AgentEvent } from "./negotiation/types";
 import { openPrivateRoom, sayInRoom } from "./rooms/reply";
 import { publicSession, SESSION_COOKIE } from "./store";
+import { clientIp, passesTurnstile, turnstileSiteKey } from "./turnstile";
 
 // Every /api route, written once against the standard Request and Response, so the same code serves
 // `next dev` locally and the person's Durable Object on Cloudflare. The host decides where the agent lives.
@@ -30,6 +32,8 @@ export type Host = {
   // Wakes the person's agent later: when a proposal's hold runs out, or when it's time to ask how something went.
   // A Durable Object alarm on Cloudflare. Locally there's none; holds are also swept on every visit.
   wake?: Scheduler;
+  // The service's daily counters: one Durable Object on Cloudflare, memory locally.
+  counter?: Counter;
 };
 
 export function cookieOf(request: Request, name: string): string | undefined {
@@ -99,6 +103,14 @@ export async function handleApi(incoming: Request, host: Host): Promise<Response
   return routes.some((r) => r.pattern.test(path)) ? jsonError("Method not allowed.", 405) : jsonError("Not found.", 404);
 }
 
+// One use of the person's daily quota, saved with their session. Returns the refusal, or null to go ahead.
+function quota(actor: Actor, kind: QuotaKind): Response | null {
+  const refused = spend(actor.session, kind);
+  if (refused) return jsonError(refused, 429);
+  persist(actor);
+  return null;
+}
+
 function agentsOf(host: Host): Agents {
   return host.agents ?? agentModels();
 }
@@ -107,7 +119,8 @@ function sessionBody(host: Host, actor: Actor | undefined) {
   const agents = agentsOf(host);
   // Which model runs the agents, so the person can see their agent isn't a weaker tier than anyone else's.
   // `busy` tells a reopened page that the agent is still out, so it can follow the run live.
-  return { mode: agents.mode, model: agents.label, busy: actor?.busy ?? null, session: actor ? publicSession(actor.session) : null };
+  // `turnstile` is the site key when new sessions need a bot check.
+  return { mode: agents.mode, model: agents.label, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), session: actor ? publicSession(actor.session) : null };
 }
 
 function getSession(_request: Request, host: Host) {
@@ -121,9 +134,21 @@ function getSession(_request: Request, host: Host) {
   return Response.json(sessionBody(host, actor));
 }
 
+// A daily key per address, hashed with the day so no address is kept.
+async function addressKey(request: Request): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${today()}|${clientIp(request)}`));
+  return `ip:${[...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
 async function startSession(request: Request, host: Host) {
-  const input = await body(request, z.object({ name: z.string().trim().min(1).max(40) }));
+  const input = await body(request, z.object({ name: z.string().trim().min(1).max(40), turnstile: z.string().max(2048).optional() }));
   if (!input) return jsonError("Tell your agent your first name.", 400);
+  // A new session gets a fresh daily quota, so starting one is where bots are stopped: the bot check, a few new
+  // agents per address a day, and a ceiling on new agents for the whole service.
+  if (!(await passesTurnstile(input.turnstile, request))) return jsonError("We couldn't check you're a person. Reload the page and try again.", 403);
+  const counter = host.counter ?? localCounter;
+  if (!(await counter.take(await addressKey(request), DAILY.sessionsPerIp))) return jsonError("You've started several agents today. Come back tomorrow, or keep using the one you have.", 429);
+  if (!(await counter.take("sessions", DAILY.sessions))) return jsonError("Open is full for today. Try again tomorrow.", 429);
   const actor = host.start(input.name);
   persist(actor);
   return Response.json(sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, 60 * 60 * 24 * 30) } });
@@ -139,6 +164,7 @@ const IntakeInput = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choices"), itemId: z.string(), picked: z.array(z.string()).min(1).max(8) }),
   z.object({ kind: z.literal("number"), itemId: z.string(), value: z.number().finite() }),
   z.object({ kind: z.literal("recap"), itemId: z.string(), answer: z.enum(["confirm", "change"]) }),
+  z.object({ kind: z.literal("refresh") }),
   z.object({ kind: z.literal("pairs"), itemId: z.string(), picks: z.record(z.string(), z.enum(["a", "b"])) }),
 ]);
 
@@ -150,12 +176,18 @@ async function intake(request: Request, host: Host) {
   if (limited) return limited;
   const input = await body(request, IntakeInput);
   if (!input) return jsonError("That message couldn't be read.", 400);
+  const over = quota(actor, "turns");
+  if (over) return over;
   const early: IntakeEvent[] = [];
 
   let userText: string;
   if (input.kind === "start") {
     if (session.chat.length > 0) return jsonError("This conversation has already started.", 409);
     userText = openingMessage(session.name);
+  } else if (input.kind === "refresh") {
+    // The app asks for the recap again, after the person changed what their agent will look for. Nothing shows as theirs.
+    if (session.recapConfirmed) return jsonError("The recap is already confirmed.", 409);
+    userText = `[App note: ${session.name} changed what their agent will look for. Show the recap again so they can check it.]`;
   } else if (input.kind === "text") {
     // Typing instead of using a quick-pick answers it.
     for (const item of session.chat) if (item.widget && !item.answered) item.answered = true;
@@ -234,11 +266,13 @@ async function setIntent(request: Request, host: Host, [id]: string[]) {
   intent.status = input.status;
   observe(actor, { type: "intent", intent });
   session.pendingNotes.push(`[App note: ${session.name} ${input.status === "confirmed" ? "confirmed" : "rejected"} the inferred intent "${intent.summary}".]`);
-  session.ready = session.ready && isReady(session);
-  // What the agent will look for changed, so the recap needs another look.
+  // What the agent will look for changed, so the recap needs another look before it can go out. Ready always means
+  // the recap is confirmed: otherwise "Send my agent out" would stay on screen and be refused.
+  const recapNeeded = session.recapConfirmed;
   session.recapConfirmed = false;
+  session.ready = false;
   persist(actor);
-  return Response.json({ intents: session.intents, ready: session.ready });
+  return Response.json({ intents: session.intents, ready: session.ready, recapNeeded });
 }
 
 function run(_request: Request, host: Host) {
@@ -248,8 +282,10 @@ function run(_request: Request, host: Host) {
   if (limited) return limited;
   const { session } = actor;
   if (!isReady(session)) return jsonError("Give your agent something to go out with first: an interest, or a deal with a price.", 409);
-  if (!session.recapConfirmed) return jsonError("Check the recap of what your agent will look for first.", 409);
+  if (!session.recapConfirmed) return Response.json({ error: "Your agent needs you to check the recap first.", needs: "recap" }, { status: 409 });
   if (actor.busy) return jsonError("Your agent is already out. Wait for it to come back.", 409);
+  const over = quota(actor, "runs");
+  if (over) return over;
   const narrator = agentsOf(host).narrator();
   session.decisions = {};
   session.followups = {};
@@ -348,6 +384,8 @@ async function privateRoom(request: Request, host: Host) {
   if (limited) return limited;
   const input = await body(request, z.object({ name: z.string().min(1).max(80) }));
   if (!input) return jsonError("Choose who to message.", 400);
+  const over = quota(actor, "privateRooms");
+  if (over) return over;
   return ndjson<AgentEvent>(actor, async (emit) => {
     await openPrivateRoom(actor.session, input.name, emit);
   });
@@ -360,6 +398,8 @@ async function message(request: Request, host: Host, [id]: string[]) {
   if (limited) return limited;
   const input = await body(request, z.object({ text: z.string().trim().min(1).max(500) }));
   if (!input) return jsonError("Write a message first.", 400);
+  const over = quota(actor, "roomMessages");
+  if (over) return over;
   const responder = agentsOf(host).responder();
   return ndjson<AgentEvent>(actor, (emit) => sayInRoom(actor.session, id!, input.text, responder, emit));
 }
@@ -372,6 +412,8 @@ async function renegotiateRoom(request: Request, host: Host, [id]: string[]) {
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to finish.", 409);
   const input = await body(request, z.object({ limit: z.number().finite().positive().max(100000) }));
   if (!input) return jsonError("Choose a new limit.", 400);
+  const over = quota(actor, "renegotiations");
+  if (over) return over;
   const intent = actor.session.intents.find((i) => id!.startsWith(`${i.id}-`));
   if (intent) record(actor, { kind: "you", by: "you", room: id, text: `You changed your private ${intent.direction === "seek" ? "limit" : "floor"} for “${intent.summary}” to ${formatPrice(input.limit, intent.unit)}` });
   const narrator = agentsOf(host).narrator();

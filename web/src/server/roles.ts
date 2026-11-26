@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env } from "./env";
 import type { ChatModel, ChatResponse } from "./intake/openmodel";
+import { budgetedFetch, type Counter } from "./limits";
 
 // Which model does which job. Kept in code, not in a router, so a change is reviewed like any other.
 //
@@ -43,11 +44,15 @@ export function modelFor(role: Role) {
 // A Claude client for one role. With OPEN_AI_GATEWAY_URL set, calls go through Cloudflare AI Gateway, which logs
 // them, retries, and tags each with its role so spend and errors can be read per job. With a key stored in the
 // gateway (OPEN_AI_GATEWAY_BYOK=true) the app holds no Anthropic key at all.
-export function claudeFor(role: Role): Anthropic {
+// Every client counts its requests against the day's Claude budget, gives up on a request after 90 seconds and
+// retries at most twice, so a slow or failing API can't stack up calls.
+export function claudeFor(role: Role, counter?: Counter): Anthropic {
+  const limits = { timeout: 90_000, maxRetries: 2, ...(counter ? { fetch: budgetedFetch(counter) } : {}) };
   const gateway = env.OPEN_AI_GATEWAY_URL;
-  if (!gateway) return new Anthropic();
+  if (!gateway) return new Anthropic(limits);
   const byok = env.OPEN_AI_GATEWAY_BYOK === "true";
   return new Anthropic({
+    ...limits,
     baseURL: gateway,
     apiKey: byok ? "stored-in-gateway" : env.ANTHROPIC_API_KEY,
     defaultHeaders: {
@@ -72,13 +77,15 @@ export const OPEN_MODEL = {
 } as const;
 
 // The part of the Workers AI binding Open uses.
-export type AiBinding = { run(model: string, input: Record<string, unknown>): Promise<unknown> };
+export type AiBinding = { run(model: string, input: Record<string, unknown>, options?: { gateway?: { id: string } }): Promise<unknown> };
 
 // Each call logs its model, time, cost and which tools it called: never anything the person said.
 export function workersAiChat(ai: AiBinding): ChatModel {
   return async (request) => {
     const started = Date.now();
-    const response = (await ai.run(OPEN_MODEL.model, { ...request, chat_template_kwargs: { enable_thinking: false } })) as ChatResponse;
+    // Through AI Gateway when one is set: its logs, and a rate limit set in the dashboard on top of Open's own.
+    const options = env.OPEN_WORKERS_AI_GATEWAY ? { gateway: { id: env.OPEN_WORKERS_AI_GATEWAY } } : undefined;
+    const response = (await ai.run(OPEN_MODEL.model, { ...request, chat_template_kwargs: { enable_thinking: false } }, options)) as ChatResponse;
     const calls = response.choices[0]?.message.tool_calls?.map((c) => c.function.name) ?? [];
     console.log(JSON.stringify({ at: "workers-ai", model: OPEN_MODEL.model, ms: Date.now() - started, neurons: Math.round(response.usage?.neurons ?? 0), calls }));
     return response;

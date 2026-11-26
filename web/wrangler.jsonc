@@ -15,10 +15,21 @@
   "durable_objects": {
     "bindings": [
       { "name": "PERSON_AGENT", "class_name": "PersonAgent" },
-      { "name": "MARKET", "class_name": "MarketAgent" }
+      { "name": "MARKET", "class_name": "MarketAgent" },
+      // The service's daily budget: one object holds every counter.
+      { "name": "BUDGET", "class_name": "Budget" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PersonAgent", "MarketAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["PersonAgent", "MarketAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["Budget"] }
+  ],
+  // Per-address rate limits at the edge, before any agent wakes. Counted per Cloudflare location, so they're a
+  // flood guard; the daily caps in the Budget object are the exact ones.
+  "ratelimits": [
+    { "name": "API_LIMITER", "namespace_id": "1001", "simple": { "limit": 120, "period": 60 } },
+    { "name": "SESSION_LIMITER", "namespace_id": "1002", "simple": { "limit": 3, "period": 60 } }
+  ],
   // Cloudflare Browser Run, for the read-only page reader.
   "browser": { "binding": "BROWSER" },
   // Workers AI: an open model runs the agent when there's no Claude key. Calls are billed even from wrangler dev.

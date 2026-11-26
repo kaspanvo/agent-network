@@ -8,6 +8,7 @@ import { AppHeader } from "../AppHeader";
 import { AgentChat } from "./AgentChat";
 import { AgentAvatar } from "./Avatar";
 import { AgentDetails, RoomDetails } from "./Details";
+import { TurnstileCheck } from "../start/Turnstile";
 import { useIntake, useRun } from "./hooks";
 import { RoomChat } from "./RoomChat";
 import { followupOf, lastLine, notPicked, priceOf, threadTitle, type Thread } from "./runState";
@@ -64,6 +65,10 @@ export function InboxApp() {
   const [seen, setSeen] = useState<Record<string, number>>({});
   const [nameDraft, setNameDraft] = useState("");
   const [starting, setStarting] = useState(false);
+  // Cloudflare Turnstile on starting an agent, when the server asks for it.
+  const [turnstileKey, setTurnstileKey] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileAttempt, setTurnstileAttempt] = useState(0);
 
   const { run, running, busyRoom, decisions } = runs;
   // The agent is out on a run, as opposed to streaming one room's replies, a yes, or a check-in.
@@ -84,9 +89,10 @@ export function InboxApp() {
     window.addEventListener("popstate", onPop);
     api
       .session()
-      .then(({ mode, model, busy, session }) => {
+      .then(({ mode, model, busy, turnstile, session }) => {
         setMode(mode);
         setModel(model);
+        setTurnstileKey(turnstile);
         if (!session) return;
         setName(session.name);
         setTrust(trustOf(session));
@@ -159,18 +165,26 @@ export function InboxApp() {
     });
   };
 
+  // Sending the agent out. If the recap needs another look first, the agent shows it, instead of a refusal.
+  const sendOut = async () => {
+    const needs = await runs.start();
+    if (needs === "recap") await intake.refresh();
+  };
+
   const begin = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = nameDraft.trim();
-    if (!trimmed) return;
+    if (!trimmed || (turnstileKey && !turnstileToken)) return;
     setStarting(true);
     try {
-      const { session } = await api.start(trimmed);
+      const { session } = await api.start(trimmed, turnstileToken ?? undefined);
       setName(session!.name);
       select(AGENT);
       await intake.send({ kind: "start" });
     } catch (err) {
       intake.setError((err as Error).message);
+      // A Turnstile token works once: get a fresh one for the next try.
+      if (turnstileKey) setTurnstileAttempt((n) => n + 1);
     } finally {
       setStarting(false);
     }
@@ -312,10 +326,11 @@ export function InboxApp() {
               maxLength={40}
               className="min-h-12 min-w-0 flex-1 rounded-full border border-line bg-white px-4 outline-none focus:border-ink"
             />
-            <button type="submit" disabled={starting || !nameDraft.trim()} className="min-h-12 rounded-full bg-ink px-6 font-semibold text-white disabled:opacity-40">
+            <button type="submit" disabled={starting || !nameDraft.trim() || (!!turnstileKey && !turnstileToken)} className="min-h-12 rounded-full bg-ink px-6 font-semibold text-white disabled:opacity-40">
               Start
             </button>
           </form>
+          {turnstileKey && <TurnstileCheck siteKey={turnstileKey} action="start" attempt={turnstileAttempt} onToken={setTurnstileToken} />}
           <p className="text-xs text-slate">
             {mode === "claude"
               ? "Claude, Anthropic's AI, runs your agent."
@@ -391,7 +406,7 @@ export function InboxApp() {
               onSend={intake.send}
               onStop={intake.stop}
               onDecideIntent={intake.decideIntent}
-              onSendOut={runs.start}
+              onSendOut={sendOut}
               onOpenRoom={select}
               understanding={trust.understanding}
               onBack={() => select(null)}
@@ -432,7 +447,7 @@ export function InboxApp() {
                   activeId={run.activeId}
                   running={out}
                   onDecide={intake.decideIntent}
-                  onSendOut={runs.start}
+                  onSendOut={sendOut}
                   sentOut={sentOut}
                   mode={mode}
                   model={model}
