@@ -154,3 +154,24 @@ describe("changing a limit in a room", () => {
     expect(third.status).toBe(409);
   });
 });
+
+describe("people who aren't members", () => {
+  it("keeps a deletion request without needing a session", async () => {
+    const { receivedPrivacyRequests } = await import("./api");
+    const host: Host = { actor: undefined, start: () => { throw new Error("no session"); } };
+    const ok = await call(host, "POST", "/api/privacy/requests", { kind: "delete", about: "Someone's agent mentioned me in a running room last week." });
+    expect(ok.status).toBe(202);
+    expect(receivedPrivacyRequests().at(-1)).toMatchObject({ kind: "delete" });
+    expect((await call(host, "POST", "/api/privacy/requests", { kind: "delete", about: "short" })).status).toBe(400);
+  });
+
+  it("won't note anything about someone else", async () => {
+    const { runTool } = await import("./intake/tools");
+    const session = createSession("Ana");
+    const item = { id: "a", role: "agent" as const, text: "" };
+    const refused = await runTool({ session, item, emit: () => {} }, "note_about_person", { fact: "My boss wants me to learn Spanish", evidence: "my boss wants me to" });
+    expect(refused.isError).toBe(true);
+    const kept = await runTool({ session, item, emit: () => {} }, "note_about_person", { fact: "Beginner in Spanish", evidence: "I'm a beginner" });
+    expect(kept.isError).toBeFalsy();
+  });
+});

@@ -49,7 +49,7 @@ export class PersonAgent extends Agent<Env> {
 
   private market(): Market {
     const stub = this.env.MARKET.getByName(COMMUNITY);
-    return { match: (intents) => stub.match(intents) };
+    return { match: (intents) => stub.match(intents), report: (memberIds, outcome) => stub.report(memberIds, outcome) };
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -63,6 +63,7 @@ export class PersonAgent extends Agent<Env> {
         return this.actor;
       },
       market: this.market(),
+      privacyRequests: (r) => this.env.MARKET.getByName(COMMUNITY).keepPrivacyRequest(r),
       counter: this.counter,
       agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI, this.counter),
       // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,

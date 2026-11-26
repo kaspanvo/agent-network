@@ -101,7 +101,22 @@ export function useIntake() {
     }
   };
 
-  return { chat, intents, goals, about, ready, busy, error, load, send, stop, decideIntent, refresh, setError };
+  const setMandate = async (id: string, price: number, days: number) => {
+    try {
+      setIntents((await api.setMandate(id, price, days)).intents);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+  const dropMandate = async (id: string) => {
+    try {
+      setIntents((await api.dropMandate(id)).intents);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
+
+  return { chat, intents, goals, about, ready, busy, error, load, send, stop, decideIntent, refresh, setMandate, dropMandate, setError };
 }
 
 export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void) {

@@ -35,7 +35,13 @@ export default {
     if (!isSessionId(id) || (request.method === "DELETE" && url.pathname === "/api/session")) {
       // No agent yet, or leaving: nothing to wake.
       // Still answers which model runs agents, so the first screen says it truthfully.
-      return handleApi(request, { actor: undefined, counter, agents: agentModels(undefined, env.AI, counter), start: () => { throw new Error("Start a session first."); } });
+      return handleApi(request, {
+        actor: undefined,
+        counter,
+        agents: agentModels(undefined, env.AI, counter),
+        privacyRequests: (r) => env.MARKET.getByName("lisbon-pilot").keepPrivacyRequest(r),
+        start: () => { throw new Error("Start a session first."); },
+      });
     }
     const agent = await getAgentByName(env.PERSON_AGENT, id);
     return agent.fetch(request);

@@ -70,6 +70,8 @@ export function saveIntent(session: Session, input: SaveIntentInput): ProfileInt
     status: existing?.status ?? (input.provenance === "inferred" ? "pending" : "confirmed"),
     ...pick("priority", input.priority, existing?.priority),
     ...pick("prefers", input.prefers, existing?.prefers),
+    // A standing yes stays with its intent; if the intent changed, its fingerprint no longer matches and it covers nothing.
+    ...(existing?.mandate ? { mandate: existing.mandate } : {}),
   };
   // Something new to look for means the person should see the recap again before the agent goes out with it.
   if (!existing) session.recapConfirmed = false;

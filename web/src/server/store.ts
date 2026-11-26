@@ -5,6 +5,7 @@ import { allDisclosures } from "./disclosure";
 import { isReady, isStale } from "./intake/profile";
 import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
 import type { OpenMessage } from "./intake/openmodel";
+import type { AgentKey } from "./identity";
 import { understandingOf, type Calibration } from "./intake/calibration";
 import type { ChatItem } from "./intake/types";
 import type { PageFacts } from "./tools/reader";
@@ -58,7 +59,8 @@ export type Session = {
   ready: boolean;
   // Notes for the agent about things the person did outside the chat, sent with their next message.
   pendingNotes: string[];
-  run: { at: string; events: AgentEvent[]; opportunities: Opportunity[] } | null;
+  // `queued`: proposals found but not yet shown, because a person gets a few at a time.
+  run: { at: string; events: AgentEvent[]; opportunities: Opportunity[]; queued?: Opportunity[] } | null;
   decisions: Record<string, Outcome>;
   // The person checked the recap of what their agent will look for and said it's right.
   recapConfirmed: boolean;
@@ -68,6 +70,8 @@ export type Session = {
   // Public pages the agent read for the person, with the facts it took from each.
   sources?: PageFacts[];
   followups: Record<string, { stage: "introduced" | "done"; answer?: CheckIn; dueAt?: string; asked?: boolean }>;
+  // The agent's own signing key. The private half never leaves the session.
+  agentKey?: AgentKey;
   // Today's use against the person's daily quotas.
   usage?: { day: string; counts: Partial<Record<string, number>> };
 };
@@ -133,6 +137,8 @@ export function publicSession(session: Session) {
     // How well the agent read the person: only the score, never its guesses.
     understanding: understandingOf(session.calibration),
     followups: session.followups,
+    // The agent's public identity: what its signatures can be checked against. Never the private key.
+    agent: session.agentKey ? { id: session.agentKey.id, publicJwk: session.agentKey.publicJwk } : null,
     sources: session.sources ?? [],
   };
 }

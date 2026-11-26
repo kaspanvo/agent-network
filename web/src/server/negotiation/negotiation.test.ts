@@ -123,3 +123,14 @@ describe("runAgent", () => {
     expect(events.at(-1)).toMatchObject({ type: "done", stats: { ready: 2, rooms: 1 } });
   });
 });
+
+describe("facts only", () => {
+  it("lets a model reword an agent's line, but replaces any line that adds a detail nobody approved", async () => {
+    const { grounded } = await import("./narrator");
+    const scripted = "Ana would like learn Spanish, evenings. Ana's sealed offer is in.";
+    const facts = ["Ana", "Learn Spanish", "Evenings", "Lucía", "One-to-one Spanish conversation"];
+    expect(grounded("Hello! Ana is keen to learn Spanish in the evenings, and her sealed offer is in.", scripted, facts)).not.toBe(scripted);
+    expect(grounded("Ana just moved from Berlin and is nervous about speaking, but her sealed offer is in.", scripted, facts)).toBe(scripted);
+    expect(grounded("Ana already has a teacher on Mondays; offer sent.", scripted, facts)).toBe(scripted);
+  });
+});

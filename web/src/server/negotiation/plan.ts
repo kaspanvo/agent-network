@@ -76,14 +76,20 @@ export function bySeatFit<T>(candidates: T[], timesOfCandidate: (c: T) => string
     .map((x) => x.c);
 }
 
-export function planThreads(intents: ProfileIntent[], population: Population): ThreadPlan[] {
+// Two "it didn't happen" check-ins and a member's agent isn't offered new matches for a while.
+export const STRIKES_TO_PAUSE = 2;
+
+// `strikes`: the market's private count of "it didn't happen" check-ins per member.
+export function planThreads(intents: ProfileIntent[], population: Population, strikes: Record<string, number> = {}): ThreadPlan[] {
+  const paused = (memberId: string) => (strikes[memberId] ?? 0) >= STRIKES_TO_PAUSE;
   const threads: ThreadPlan[] = [];
   const memberOf = (c: Intent) => population.members.find((m) => m.id === c.memberId)!;
 
   for (const intent of intents) {
     if (intent.status !== "confirmed" || intent.price === null || isInterest(intent)) continue;
     const yourTimes = timesOf(intent.conditions);
-    const candidates = population.intents.filter((c) => c.tag === intent.tag && c.direction !== intent.direction);
+    // Members whose matches keep not happening aren't offered for a while. Nobody is told why: the count is private.
+    const candidates = population.intents.filter((c) => c.tag === intent.tag && c.direction !== intent.direction && !paused(c.memberId));
 
     for (const c of candidates) {
       const member = memberOf(c);
@@ -121,7 +127,7 @@ export function planThreads(intents: ProfileIntent[], population: Population): T
         const group = c.groupPrice;
         if (group && intent.price < c.price && intent.price >= group.perPerson) {
           const others = population.intents.filter(
-            (o) => o.tag === intent.tag && o.direction === "seek" && o.memberId !== c.memberId && o.price >= group.perPerson && compatible(timesOf(o.conditions), theirTimes) && compatible(timesOf(o.conditions), yourTimes),
+            (o) => o.tag === intent.tag && o.direction === "seek" && o.memberId !== c.memberId && !paused(o.memberId) && o.price >= group.perPerson && compatible(timesOf(o.conditions), theirTimes) && compatible(timesOf(o.conditions), yourTimes),
           );
           if (others.length >= group.size - 1) {
             thread.kind = "group";

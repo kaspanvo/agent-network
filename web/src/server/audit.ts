@@ -3,6 +3,7 @@ import { isStale } from "./intake/profile";
 import { everyoneSaidYes, yesStillStands } from "./negotiation/terms";
 import type { AgentEvent } from "./negotiation/types";
 import type { Session } from "./store";
+import { MAX_ROOM, ROOM_MEMORY } from "./rooms/reply";
 
 // Deterministic checks that an agent stayed faithful to its person in one room, read from the room's record.
 // Field studies found many agent agreements broke a duty to the person (loyalty, authority, confidentiality)
@@ -47,6 +48,10 @@ export function checksFor(session: Session, threadId: string): Check[] {
         ok: stands,
         detail: stands ? `You approved version ${opportunity.version}, and nothing in it changed after.` : "The terms changed after you approved, so your yes doesn't cover them.",
       });
+      if (opportunity.approvedUnder) {
+        const within = intent?.mandate?.hash === opportunity.approvedUnder || !intent?.mandate;
+        checks.push({ label: "Within your standing yes", ok: within, detail: within ? "Your agent said yes for you because every term was inside the bounds you set." : "The standing yes it was approved under has since changed." });
+      }
       if (opportunity.approvals && introAt !== -1) {
         const all = everyoneSaidYes(opportunity);
         checks.push({ label: "Everyone said yes for themself", ok: all, detail: all ? `${Object.keys(opportunity.approvals).length} of ${Object.keys(opportunity.approvals).length} people approved before anyone was introduced.` : "Someone was introduced before everyone approved." });
@@ -54,6 +59,21 @@ export function checksFor(session: Session, threadId: string): Check[] {
     }
     if (outcome === "lapsed") checks.push({ label: "Nobody kept waiting", ok: true, detail: "The hold ran out before you answered, so the others were freed and told." });
   }
+  // Collusion between agents grows with room size and with how much history they carry (it appeared in 94% of long
+  // runs in one 2026 study, and capping history cut it). Rooms stay small, and agents see only this room's recent
+  // messages, never other rooms'.
+  const room = events.find((e): e is Extract<AgentEvent, { type: "room" }> => e.type === "room");
+  const people = room ? room.members.length : 2;
+  const small = people <= MAX_ROOM;
+  checks.push({ label: "Small room, no shared memory", ok: small, detail: small ? `${people} people. Agents here see only this room's last ${ROOM_MEMORY} messages, never other rooms'.` : `${people} people is more than the ${MAX_ROOM} a room should hold.` });
+
+  // Everything the person's agent said carries its signature, checkable against its public key.
+  const ours = messages.filter((m) => m.from === "you" || m.from === "person");
+  if (ours.length && session.agentKey) {
+    const all = ours.every((m) => !!m.signature);
+    checks.push({ label: "Signed by your agent", ok: all, detail: all ? `Every message your agent sent here carries its signature (key ${session.agentKey.id}).` : "A message from your agent here has no signature." });
+  }
+
   const freeform = messages.filter((m) => m.from !== "person" && !m.action).length;
   checks.push({ label: "Typed moves only", ok: freeform === 0, detail: "Every agent message is a typed move; the words only explain it." });
   return checks;

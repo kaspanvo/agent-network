@@ -465,6 +465,7 @@ export function InboxApp() {
                   intents={intake.intents}
                   goals={intake.goals}
                   about={intake.about}
+                  mandate={{ onSet: (id, price, days) => void intake.setMandate(id, price, days), onDrop: (id) => void intake.dropMandate(id) }}
                   ready={intake.ready}
                   threads={run.threads}
                   activeId={run.activeId}

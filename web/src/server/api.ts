@@ -14,9 +14,11 @@ import { DAILY, localCounter, spend, today, type Counter, type QuotaKind } from 
 import { localMarket, type Market } from "./market";
 import { agentModels, type Agents } from "./models";
 import { MAX_RENEGOTIATIONS, renegotiate, renegotiationsLeft } from "./negotiation/renegotiate";
-import { runAgent } from "./negotiation/run";
+import { releaseNext, runAgent } from "./negotiation/run";
 import type { AgentEvent } from "./negotiation/types";
 import { openPrivateRoom, sayInRoom } from "./rooms/reply";
+import { covers, makeMandate, mandateWords } from "./mandate";
+import { memberByName } from "./population";
 import { publicSession, SESSION_COOKIE } from "./store";
 import { clientIp, passesTurnstile, turnstileSiteKey } from "./turnstile";
 
@@ -34,7 +36,22 @@ export type Host = {
   wake?: Scheduler;
   // The service's daily counters: one Durable Object on Cloudflare, memory locally.
   counter?: Counter;
+  // Where requests from people who aren't members are kept (to delete or correct something an agent said about them).
+  privacyRequests?: (request: PrivacyRequest) => Promise<void>;
 };
+
+export const PrivacyRequest = z.object({
+  kind: z.enum(["delete", "correct", "question"]),
+  about: z.string().trim().min(10).max(1500),
+  contact: z.string().trim().max(200).optional(),
+});
+export type PrivacyRequest = z.infer<typeof PrivacyRequest> & { at: string };
+
+// Kept in memory when the host has nowhere better (local development and tests).
+const localRequests: PrivacyRequest[] = [];
+export function receivedPrivacyRequests(): readonly PrivacyRequest[] {
+  return localRequests;
+}
 
 export function cookieOf(request: Request, name: string): string | undefined {
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
@@ -78,6 +95,9 @@ const routes: Route[] = [
   { method: "POST", pattern: /^\/api\/rooms\/private$/, handle: privateRoom },
   { method: "POST", pattern: /^\/api\/rooms\/([^/]+)\/messages$/, handle: message },
   { method: "POST", pattern: /^\/api\/rooms\/([^/]+)\/renegotiate$/, handle: renegotiateRoom },
+  { method: "POST", pattern: /^\/api\/privacy\/requests$/, handle: privacyRequest },
+  { method: "PUT", pattern: /^\/api\/intents\/([^/]+)\/mandate$/, handle: setMandate },
+  { method: "DELETE", pattern: /^\/api\/intents\/([^/]+)\/mandate$/, handle: dropMandate },
 ];
 
 const MAX_BODY = 64 * 1024;
@@ -287,6 +307,64 @@ async function intake(request: Request, host: Host) {
   });
 }
 
+// Someone who isn't a member can ask for anything an agent said about them to be deleted or corrected. No session
+// needed; the edge rate limit applies. The request is kept for the people who run Open to act on.
+async function privacyRequest(request: Request, host: Host) {
+  const input = await body(request, PrivacyRequest);
+  if (!input) return jsonError("Tell us what it's about in a sentence or two.", 400);
+  const kept: PrivacyRequest = { ...input, at: new Date().toISOString() };
+  if (host.privacyRequests) await host.privacyRequests(kept);
+  else localRequests.push(kept);
+  return Response.json({ ok: true, message: "We've recorded your request. The people who run Open will act on it, and reply if you left a way to reach you." }, { status: 202 });
+}
+
+// After a run or an answer: a standing yes the person gave answers for them, but only for proposals fully inside its
+// bounds; anything outside still waits for them. Then the next waiting proposals come in, a few at a time.
+async function answerAndRelease(actor: Actor, host: Host, emit: (event: AgentEvent) => void) {
+  const { session } = actor;
+  for (let guardLoop = 0; guardLoop < 20; guardLoop++) {
+    for (const opportunity of [...(session.run?.opportunities ?? [])]) {
+      const intent = session.intents.find((i) => i.id === opportunity.intentId);
+      if (!intent?.mandate || session.decisions[opportunity.id] || !covers(intent, opportunity)) continue;
+      opportunity.approvedUnder = intent.mandate.hash;
+      record(actor, { kind: "decision", by: "agent", room: opportunity.threadId, text: `Said yes for you to version ${opportunity.version} of “${opportunity.title}”, within your standing yes (${mandateWords(intent)})` });
+      await decide(session, opportunity.id, "approved", emit, (opportunityId, at) => host.wake?.({ kind: "check_in", opportunityId }, at));
+    }
+    const next = releaseNext(session);
+    if (!next) return;
+    emit({ type: "opportunity", opportunity: next });
+  }
+}
+
+// A standing yes: the person lets their agent accept offers for one intent within bounds, until a date.
+async function setMandate(request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const input = await body(request, z.object({ price: z.number().finite().nonnegative().max(100000), days: z.number().int() }));
+  if (!input) return jsonError("Choose a price and how long.", 400);
+  const intent = actor.session.intents.find((i) => i.id === id);
+  if (!intent) return jsonError("That intent no longer exists.", 404);
+  const mandate = makeMandate(intent, input.price, input.days);
+  if (typeof mandate === "string") return jsonError(mandate, 400);
+  intent.mandate = mandate;
+  record(actor, { kind: "you", by: "you", text: `You let your agent say yes for you to “${intent.summary}”, ${mandateWords(intent)}` });
+  persist(actor);
+  return Response.json({ intents: actor.session.intents });
+}
+
+async function dropMandate(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const intent = actor.session.intents.find((i) => i.id === id);
+  if (!intent) return jsonError("That intent no longer exists.", 404);
+  if (intent.mandate) {
+    delete intent.mandate;
+    record(actor, { kind: "you", by: "you", text: `You took back your agent's standing yes for “${intent.summary}”` });
+    persist(actor);
+  }
+  return Response.json({ intents: actor.session.intents });
+}
+
 async function setIntent(request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
@@ -337,6 +415,7 @@ async function run(request: Request, host: Host) {
     actor,
     async (emit) => {
       await runAgent(session, narrator, emit, host.market ?? localMarket(), who);
+      await answerAndRelease(actor, host, emit);
       scheduleHolds(session, host.wake);
     },
     "run",
@@ -393,7 +472,12 @@ async function decision(request: Request, host: Host, [id]: string[]) {
   if (input.version !== undefined && input.version !== opportunity.version) return jsonError(`This proposal is now version ${opportunity.version}. Look at it again before you answer.`, 409);
   if (session.decisions[id!] === "lapsed") return jsonError("This one lapsed before you answered, so the others are free again. Send your agent out again for a fresh one.", 409);
   if (session.decisions[id!]) return jsonError("You've already answered this one.", 409);
-  return ndjson<AgentEvent>(actor, (emit) => decide(session, id!, input.decision, emit, (opportunityId, at) => host.wake?.({ kind: "check_in", opportunityId }, at)));
+  return ndjson<AgentEvent>(actor, async (emit) => {
+    await decide(session, id!, input.decision, emit, (opportunityId, at) => host.wake?.({ kind: "check_in", opportunityId }, at));
+    // One answered, so the next waiting proposal can come in.
+    await answerAndRelease(actor, host, emit);
+    scheduleHolds(session, host.wake);
+  });
 }
 
 // The person needs more time to decide: the others hold their place a day longer, once.
@@ -417,7 +501,14 @@ async function checkin(request: Request, host: Host, [id]: string[]) {
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
   const input = await body(request, z.object({ answer: z.enum(["again", "once", "missed"]) }));
   if (!input) return jsonError("Say whether it happened.", 400);
-  return ndjson<AgentEvent>(actor, (emit) => checkIn(actor.session, id!, input.answer, emit));
+  const opportunity = actor.session.run?.opportunities.find((o) => o.id === id);
+  return ndjson<AgentEvent>(actor, async (emit) => {
+    await checkIn(actor.session, id!, input.answer, emit);
+    // The market keeps a private count of matches that didn't happen, per member, so unreliable ones stop being offered.
+    const others = (opportunity?.people ?? []).filter((name) => name !== actor.session.name).flatMap((name) => memberByName(name)?.id ?? []);
+    const market = host.market ?? localMarket();
+    if (others.length) await market.report?.(others, input.answer);
+  });
 }
 
 // Opens a one-to-one room with one member's agent.

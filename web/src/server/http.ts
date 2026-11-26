@@ -3,6 +3,7 @@ import type { Loggable } from "./activity";
 import { allow, broadcast, finish, observe, persist, type Actor } from "./actor";
 import { limitBehind } from "./limits";
 import type { AgentEvent } from "./negotiation/types";
+import { signUnsigned } from "./identity";
 
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
@@ -51,6 +52,7 @@ export function ndjson<E extends Loggable>(
         }
       } finally {
         if (busy) finish(actor);
+        await signUnsigned(actor.session).catch((err) => console.error("Couldn't sign the agent's messages:", err));
         persist(actor);
         emit({ type: "done" });
         if (open) controller.close();

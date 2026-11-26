@@ -6,7 +6,7 @@ import { modelFor } from "../roles";
 import { happeningSentence, LISBON_PILOT, memberByName, publicFacts } from "../population";
 import { guard, WITHHELD } from "../guard";
 import type { Session } from "../store";
-import { runStats } from "../negotiation/run";
+import { runStats, signed } from "../negotiation/run";
 import type { AgentEvent, Card, RoomMode } from "../negotiation/types";
 import type { ChatModel } from "../intake/openmodel";
 
@@ -28,6 +28,10 @@ function discoverOf(session: Session, threadId: string): Discover | undefined {
   return session.run?.events.find((e): e is Discover => e.type === "discover" && e.threadId === threadId);
 }
 
+// Rooms stay small and agents remember only a room's recent messages: both make collusion between agents less likely.
+export const MAX_ROOM = 5;
+export const ROOM_MEMORY = 12;
+
 export function roomContext(session: Session, threadId: string): RoomContext {
   const events = session.run?.events ?? [];
   const discover = discoverOf(session, threadId);
@@ -43,7 +47,7 @@ export function roomContext(session: Session, threadId: string): RoomContext {
   });
   const recent = events
     .filter((e): e is Extract<AgentEvent, { type: "message" }> => e.type === "message" && e.threadId === threadId)
-    .slice(-12)
+    .slice(-ROOM_MEMORY)
     .map((m) => `${m.from === "person" ? session.name : m.who}: ${m.text}`);
   return { you: session.name, topic: discover.about, mode: discover.mode ?? "deal", members, recent };
 }
@@ -56,7 +60,7 @@ export async function sayInRoom(session: Session, threadId: string, text: string
     run.events.push(event);
     emit(event);
   };
-  send({ type: "message", threadId, from: "person", who: session.name, action: "SAY", amount: null, unit: null, text, why: "" });
+  send(await signed(session, { type: "message", threadId, from: "person", who: session.name, action: "SAY", amount: null, unit: null, text, why: "" }));
   await pause(500);
   const replies = await responder.reply(room, text);
   // Each reply passes the privacy check with that member's own limits and yours as the secrets.

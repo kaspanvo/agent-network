@@ -6,10 +6,35 @@ import { localMarket, type Market } from "../market";
 import type { Session } from "../store";
 import { guard } from "../guard";
 import { holdUntil } from "../holds";
+import { sign } from "../identity";
 import type { Line, Narrator } from "./narrator";
 import { circleScript, planCircles, planOpportunity, type CirclePlan } from "../rooms/circle";
 import { listWords } from "./plan";
 import type { AgentEvent, Opportunity, ShortlistOption, ThreadPlan } from "./types";
+
+// How many agents one run may contact.
+export const MAX_CONTACTS = 20;
+
+// What the person's agent says carries its signature, so it can be checked as really from this agent, unchanged.
+export async function signed(session: Session, event: AgentEvent): Promise<AgentEvent> {
+  if (event.type !== "message" || (event.from !== "you" && event.from !== "person")) return event;
+  return { ...event, signature: await sign(session, event.threadId, event.text) };
+}
+
+// How many proposals wait on the person at once.
+export const MAX_PROPOSALS = 3;
+
+// After the person answers one, the next waiting proposal (if any) is shown, with its own hold.
+export function releaseNext(session: Session): Opportunity | null {
+  const run = session.run;
+  if (!run?.queued?.length) return null;
+  const waiting = run.opportunities.filter((o) => !session.decisions[o.id]).length;
+  if (waiting >= MAX_PROPOSALS) return null;
+  const next = run.queued.shift()!;
+  next.holdUntil = holdUntil();
+  run.opportunities.push(next);
+  return next;
+}
 
 export function opportunityFor(thread: ThreadPlan, you: string, version = 1, compared = 1): Opportunity {
   const price = thread.agreedPrice!;
@@ -27,6 +52,8 @@ export function opportunityFor(thread: ThreadPlan, you: string, version = 1, com
     unit: thread.unit,
     people: [you, them, ...roomNames],
     terms: [`${fmt(price)}${group ? " each" : ""}`, ...(thread.schedule ? [thread.schedule] : []), ...(group ? [`With ${listWords(roomNames)}`] : [])],
+    schedule: thread.schedule,
+    group,
     reasons: [
       thread.direction === "seek" ? `${fmt(price)} is within your ${fmt(thread.limit)} limit` : `${fmt(price)} is above your ${fmt(thread.limit)} floor`,
       ...(group ? [`${them} offered a group rate, and ${listWords(roomNames)} want the same`] : []),
@@ -132,7 +159,8 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
   await pause(800);
   // Offers are heard in random order and compared before choosing, so being first gets nobody anywhere.
   // Matching happens in the market, which alone holds other members' sealed limits. Your agent only gets back the outcome.
-  const threads = shuffled(await market.match(session.intents), session.id);
+  // At most this many agents per run, so one person's agent can't flood the network.
+  const threads = shuffled(await market.match(session.intents), session.id).slice(0, MAX_CONTACTS);
   const circles = planCircles(session.intents, LISBON_PILOT).filter((c) => c.members.length > 0);
   if (threads.length === 0 && circles.length === 0) {
     send({ type: "status", text: "Nobody in the pilot matches your intents yet. Your agent keeps listening as people join." });
@@ -177,7 +205,7 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
 
     const lines = await narrations.get(thread.id)!;
     for (const event of dealMessages(thread, lines, you)) {
-      send(event);
+      send(await signed(session, event));
       await pause(1100);
     }
     send({
@@ -208,11 +236,19 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
   for (const opportunity of opportunities) {
     const intent = session.intents.find((i) => i.id === opportunity.intentId);
     if (intent) opportunity.basis = intentBasis(intent);
+  }
+  // A few decisions at a time, the most important first, so each gets a real look. The rest wait their turn and come
+  // one by one as the person answers: fewer, better asks, the way the matchmakers that work do it.
+  const shown = opportunities.slice(0, MAX_PROPOSALS);
+  session.run.queued = opportunities.slice(MAX_PROPOSALS);
+  for (const opportunity of shown) {
     opportunity.holdUntil = holdUntil();
     session.run.opportunities.push(opportunity);
     send({ type: "opportunity", opportunity });
     await pause(500);
   }
+  if (session.run.queued.length)
+    send({ type: "status", text: `Your agent found ${session.run.queued.length} more. It brings ${MAX_PROPOSALS} at a time, and the next one comes when you answer one.` });
   send({ type: "done", stats: runStats(session) });
 }
 

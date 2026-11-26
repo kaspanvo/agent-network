@@ -60,6 +60,11 @@ export type Opportunity = {
   approvals?: Record<string, "yes" | "waiting">;
   // A fingerprint of exactly what the person approved, so a later change to the terms can't ride on their yes.
   approvedTerms?: string;
+  // When, and in what format, as agreed: what a standing yes is checked against.
+  schedule?: string | null;
+  group?: boolean;
+  // The standing yes this was approved under, when the person's agent said yes for them.
+  approvedUnder?: string;
 };
 
 // Deal rooms negotiate a price. Circles are rooms around a shared interest. Private rooms are one-to-one with one member's agent.
@@ -85,7 +90,7 @@ export type AgentEvent =
   | { type: "note"; threadId: string; text: string }
   // `from: "person"` is the person using the app, writing in the room themself.
   // `from: "open"` is Open's matcher, which sets prices in code. `withheld` marks a message the privacy check replaced.
-  | { type: "message"; threadId: string; from: "you" | "them" | "person" | "open"; who: string; action: Action; amount: number | null; unit: Unit | null; text: string; why: string; card?: Card; withheld?: boolean }
+  | { type: "message"; threadId: string; from: "you" | "them" | "person" | "open"; who: string; action: Action; amount: number | null; unit: Unit | null; text: string; why: string; card?: Card; withheld?: boolean; signature?: string }
   | { type: "outcome"; threadId: string; result: "agreed" | "no_fit" | "open"; why: string }
   | { type: "opportunity"; opportunity: Opportunity }
   // Your agent heard every offer for one intent before choosing, in random order, and shows what it compared.

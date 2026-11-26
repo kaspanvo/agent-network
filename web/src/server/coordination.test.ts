@@ -188,3 +188,105 @@ describe("who sees what in a room", () => {
     expect(after.find((d) => d.what === "That you said yes")?.status).toBe("shared");
   });
 });
+
+describe("private reliability", () => {
+  it("stops offering a member whose matches twice didn't happen, without telling anyone why", async () => {
+    const { localMarket, addStrikes } = await import("./market");
+    const { planThreads } = await import("./negotiation/plan");
+    const { LISBON_PILOT } = await import("./population");
+    const intent = { ...spanish, price: 30 };
+    const before = planThreads([intent], LISBON_PILOT).map((t) => t.counterpart.memberId);
+    expect(before).toContain("lucia");
+    const strikes = addStrikes(addStrikes({}, ["lucia"], "missed"), ["lucia"], "missed");
+    expect(addStrikes(strikes, ["lucia"], "again")).toEqual(strikes);
+    const after = planThreads([intent], LISBON_PILOT, strikes).map((t) => t.counterpart.memberId);
+    expect(after).not.toContain("lucia");
+    // Reported through the market interface, the count stays in the market.
+    const market = localMarket();
+    await market.report!(["lucia"], "missed");
+    expect(typeof market.match).toBe("function");
+  });
+});
+
+describe("a standing yes", () => {
+  it("covers a proposal only inside its bounds, in date, and for the intent as it was", async () => {
+    const { makeMandate, covers } = await import("./mandate");
+    const { session, id } = await proposed();
+    const intent = session.intents[0]!;
+    const o = session.run!.opportunities.find((x) => x.id === id)!;
+    expect(makeMandate(intent, intent.price! + 5, 7)).toMatch(/can't go past your own limit/);
+    const mandate = makeMandate(intent, o.price!, 7);
+    if (typeof mandate === "string") throw new Error(mandate);
+    intent.mandate = mandate;
+    expect(covers(intent, o)).toBe(true);
+    // A higher price, an expired yes, or a changed intent: not covered.
+    expect(covers(intent, { ...o, price: o.price! + 1 })).toBe(false);
+    expect(covers(intent, o, new Date(Date.now() + 8 * 86_400_000))).toBe(false);
+    intent.conditions = ["mornings"];
+    expect(covers(intent, o)).toBe(false);
+  });
+
+  it("lets the agent say yes for the person after a run, logs it as the agent's act, and leaves the rest waiting", async () => {
+    const session = createSession("Ana");
+    session.intents = [{ ...spanish, price: 20 }];
+    session.recapConfirmed = true;
+    session.ready = true;
+    session.calibration = { pairs: [], picks: {}, agreed: 0 };
+    const host = hostFor(session);
+    await (await handleApi(new Request("http://localhost:3000/api/intents/s1/mandate", { method: "PUT", body: JSON.stringify({ price: 20, days: 7 }) }), host)).json();
+    expect(session.intents[0]!.mandate?.price).toBe(20);
+    await (await handleApi(post("/api/agent/run", { anyway: true }), host)).text();
+    const auto = session.run!.opportunities.filter((o) => o.approvedUnder);
+    expect(auto.length).toBeGreaterThan(0);
+    for (const o of auto) expect(session.decisions[o.id]).toBe("approved");
+    expect(session.log.some((e) => e.by === "agent" && e.text.startsWith("Said yes for you"))).toBe(true);
+    expect(checksFor(session, auto[0]!.threadId).find((c) => c.label === "Within your standing yes")?.ok).toBe(true);
+  });
+});
+
+describe("a few decisions at a time", () => {
+  it("shows at most three proposals, and the next one when the person answers", async () => {
+    const { MAX_PROPOSALS } = await import("./negotiation/run");
+    const session = createSession("Ana");
+    const base = { provenance: "stated" as const, evidence: "", status: "confirmed" as const, conditions: [] as string[] };
+    session.intents = [
+      { ...spanish, price: 40, conditions: [] },
+      { ...base, id: "b1", kind: "deal", direction: "offer", tag: "road-bike", summary: "Sell my road bike", price: 10, unit: "one-off" },
+      { ...base, id: "c1", kind: "deal", direction: "offer", tag: "used-camera", summary: "Sell my camera", price: 10, unit: "one-off" },
+      { ...base, id: "d1", kind: "deal", direction: "seek", tag: "dog-sitting", summary: "Find a dog-sitter", price: 900, unit: "one-off" },
+      { ...base, id: "j1", kind: "interest", direction: "seek", tag: "live-music", summary: "Live music, mostly jazz", price: null, unit: "one-off" },
+    ];
+    session.recapConfirmed = true;
+    session.ready = true;
+    session.calibration = { pairs: [], picks: {}, agreed: 0 };
+    const host = hostFor(session);
+    await (await handleApi(post("/api/agent/run", { anyway: true }), host)).text();
+    const run = session.run!;
+    expect(run.opportunities.length).toBeLessThanOrEqual(MAX_PROPOSALS);
+    expect(run.queued?.length ?? 0).toBeGreaterThan(0);
+    const before = run.opportunities.length;
+    const first = run.opportunities[0]!;
+    await (await handleApi(post(`/api/opportunities/${first.id}`, { decision: "declined" }), host)).text();
+    expect(run.opportunities.length).toBe(before + 1);
+    expect(run.opportunities.filter((o) => !session.decisions[o.id]).length).toBeLessThanOrEqual(MAX_PROPOSALS);
+  });
+});
+
+describe("signed messages", () => {
+  it("signs what the person's agent says, so it can be checked as unchanged, and never shares the private key", async () => {
+    const { verify } = await import("./identity");
+    const { publicSession } = await import("./store");
+    const { session } = await proposed();
+    const key = session.agentKey!;
+    const ours = session.run!.events.filter((e): e is Extract<typeof e, { type: "message" }> => e.type === "message" && e.from === "you");
+    expect(ours.length).toBeGreaterThan(0);
+    for (const m of ours) expect(await verify(key, m.threadId, m.text, m.signature!)).toBe(true);
+    // Changed words, or another room, no longer verify.
+    const m = ours[0]!;
+    expect(await verify(key, m.threadId, `${m.text}!`, m.signature!)).toBe(false);
+    expect(await verify(key, "another-room", m.text, m.signature!)).toBe(false);
+    const shown = JSON.stringify(publicSession(session));
+    expect(shown).toContain(key.id);
+    expect(shown).not.toContain(String(key.privateJwk.d));
+  });
+});

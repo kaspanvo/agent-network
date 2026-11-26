@@ -29,6 +29,10 @@ const ReadPageInput = z.object({ url: z.string().min(1).max(2000) });
 export const SuggestRepliesInput = z.object({ options: z.array(z.string().min(1).max(60)).min(1).max(3) });
 const NoteInput = z.object({ fact: z.string().min(1).max(160), evidence: z.string().max(400) });
 
+// A note about someone else (a friend, a partner, a boss) isn't the person's to give: they never agreed to it.
+const ABOUT_SOMEONE_ELSE =
+  /\b(?:my|his|her|their|our)\s+(?:friends?|wife|husband|partner|girlfriend|boyfriend|ex|mother|mum|mom|father|dad|parents?|sister|brother|boss|manager|colleagues?|co-?workers?|son|daughter|kids?|children|neighbou?rs?|flatmates?|roommates?|family)\b|^\s*(?:he|she|they)\b|\b(?:he|she)\s+(?:is|was|has|had|likes?|wants?|works?|lives?)\b/i;
+
 export const REPLIES_RULE = "Two or three short replies the person could send to answer the question you just asked, in their voice and in the first person, under six words each. They answer your question; never questions back to you, and never about something else.";
 
 export const TOOL_SPECS: ToolSpec[] = [
@@ -193,6 +197,7 @@ export async function runTool(ctx: ToolContext, name: string, input: unknown): P
   if (name === "note_about_person") {
     const parsed = NoteInput.safeParse(input);
     if (!parsed.success) return fail(z.prettifyError(parsed.error));
+    if (ABOUT_SOMEONE_ELSE.test(parsed.data.fact)) return fail("That's about someone else. Notes are only about the person you represent; leave other people out.");
     const about = (session.about ??= []);
     const same = about.find((n) => n.fact.toLowerCase() === parsed.data.fact.trim().toLowerCase());
     if (!same) {

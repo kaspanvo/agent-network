@@ -92,6 +92,9 @@ export const api = {
   setIntent: (id: string, status: "confirmed" | "rejected") =>
     post(`/api/intents/${id}`, { status }, "PATCH").then(json<{ intents: PublicSession["intents"]; ready: boolean; recapNeeded: boolean }>),
   // `anyway`: go out even though the agent got many of the person's picks wrong, because they said so.
+  // A standing yes for one intent, and taking it back.
+  setMandate: (id: string, price: number, days: number) => post(`/api/intents/${id}/mandate`, { price, days }, "PUT").then(json<{ intents: PublicSession["intents"] }>),
+  dropMandate: (id: string) => fetch(`/api/intents/${id}/mandate`, { method: "DELETE" }).then(json<{ intents: PublicSession["intents"] }>),
   run: (anyway = false) => post("/api/agent/run", anyway ? { anyway } : {}).then((r) => lines<AgentEvent>(r)),
   // `version` is the version on screen: if the proposal changed since, the server refuses rather than apply the answer to new terms.
   decide: (id: string, decision: "approved" | "declined", version?: number) => post(`/api/opportunities/${id}`, { decision, version }).then((r) => lines<AgentEvent>(r)),

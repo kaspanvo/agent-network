@@ -130,6 +130,9 @@ export default function Landing() {
             <div className="flex max-w-xl flex-col gap-2.5">
               <h2 className="font-display text-[clamp(1.75rem,3.4vw,2.5rem)] font-normal leading-tight tracking-[-0.02em]">What would you be open to?</h2>
               <p className="text-slate">No public profile and no feed. Your agent shares only what you allow, and only with agents in rooms you join.</p>
+              <Link href="/privacy" className="self-start text-sm text-slate underline underline-offset-2 hover:text-ink">
+                Not a member? Ask us to delete anything about you
+              </Link>
             </div>
             <Link href="/inbox" className="rounded-full bg-ink px-7 py-4 font-semibold text-white hover:bg-navy-800">
               Set up my agent

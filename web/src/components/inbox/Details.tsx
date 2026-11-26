@@ -8,7 +8,7 @@ import type { Disclosure } from "@/server/disclosure";
 import type { LogActor, LogEntry } from "@/server/store";
 import { useState } from "react";
 import { NetworkGraph } from "../agent/NetworkGraph";
-import { AgentPanel } from "../start/AgentPanel";
+import { AgentPanel, type MandateControls } from "../start/AgentPanel";
 import { AgentAvatar, Avatar } from "./Avatar";
 import type { Shortlist, Thread } from "./runState";
 
@@ -199,6 +199,7 @@ export function AgentDetails(props: {
   intents: ProfileIntent[];
   goals: string[];
   about: AboutNote[];
+  mandate: MandateControls;
   ready: boolean;
   threads: Thread[];
   activeId: string | null;
@@ -221,6 +222,7 @@ export function AgentDetails(props: {
         intents={props.intents}
         goals={props.goals}
         about={props.about}
+        mandate={props.mandate}
         ready={props.ready}
         onDecide={props.onDecide}
         footer={

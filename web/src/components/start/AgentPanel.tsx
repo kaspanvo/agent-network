@@ -1,6 +1,7 @@
 "use client";
 
-import { profileOf, type AboutNote, type ProfileEntry, type ProfileIntent } from "@/server/domain";
+import { useState } from "react";
+import { formatPrice, profileOf, type AboutNote, type ProfileEntry, type ProfileIntent } from "@/server/domain";
 import { Mark } from "../Brand";
 
 function readiness(intents: ProfileIntent[], ready: boolean): number {
@@ -23,7 +24,74 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Entry({ entry, interest, onDecide }: { entry: ProfileEntry; interest: boolean; onDecide: (status: "confirmed" | "rejected") => void }) {
+export type MandateControls = { onSet: (id: string, price: number, days: number) => void; onDrop: (id: string) => void };
+
+// A standing yes for one deal: the agent may accept offers inside these bounds without asking, until the date.
+function StandingYes({ entry, controls }: { entry: ProfileEntry; controls: MandateControls }) {
+  const [open, setOpen] = useState(false);
+  const [price, setPrice] = useState(entry.limitValue ?? 0);
+  const [days, setDays] = useState(14);
+  if (entry.limitValue === null || entry.status !== "confirmed") return null;
+  const seek = entry.direction === "seek";
+  if (entry.standingYes)
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-live-soft px-3 py-2 text-[13px] text-live-ink">
+        <span>Standing yes: {entry.standingYes}</span>
+        <button type="button" onClick={() => controls.onDrop(entry.id)} className="min-h-9 font-medium underline underline-offset-2">
+          Take back
+        </button>
+      </div>
+    );
+  if (!open)
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="min-h-9 self-start text-[13px] text-slate underline underline-offset-2 hover:text-ink">
+        Let my agent say yes for me…
+      </button>
+    );
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        controls.onSet(entry.id, price, days);
+        setOpen(false);
+      }}
+      className="flex flex-col gap-2 rounded-xl border border-line bg-white p-3 text-[13px]"
+    >
+      <p className="text-slate">Your agent says yes for you to offers {seek ? "at or below" : "at or above"} this, at the times and in the format you asked for. Anything else still waits for you.</p>
+      <label className="flex items-center justify-between gap-2">
+        <span>{seek ? "Up to" : "From"}</span>
+        <input
+          type="number"
+          min={seek ? 0 : entry.limitValue}
+          max={seek ? entry.limitValue : undefined}
+          step={1}
+          value={price}
+          onChange={(e) => setPrice(Number(e.target.value))}
+          className="min-h-9 w-24 rounded-lg border border-line px-2 text-right"
+          aria-label={`Standing yes ${seek ? "up to" : "from"}, ${formatPrice(entry.limitValue, entry.unit)} is your ${seek ? "limit" : "floor"}`}
+        />
+      </label>
+      <label className="flex items-center justify-between gap-2">
+        <span>For</span>
+        <select value={days} onChange={(e) => setDays(Number(e.target.value))} className="min-h-9 rounded-lg border border-line px-2">
+          <option value={7}>a week</option>
+          <option value={14}>two weeks</option>
+          <option value={30}>a month</option>
+        </select>
+      </label>
+      <div className="flex gap-2">
+        <button type="submit" className="min-h-9 rounded-full bg-ink px-4 font-semibold text-white">
+          Save
+        </button>
+        <button type="button" onClick={() => setOpen(false)} className="min-h-9 rounded-full px-3 text-slate">
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function Entry({ entry, interest, onDecide, mandate }: { entry: ProfileEntry; interest: boolean; onDecide: (status: "confirmed" | "rejected") => void; mandate?: MandateControls }) {
   const pending = entry.status === "pending";
   const facts = [
     interest ? "Rooms and plans, no money" : entry.limit ? `${entry.limit} · private` : null,
@@ -40,6 +108,7 @@ function Entry({ entry, interest, onDecide }: { entry: ProfileEntry; interest: b
       {facts.length > 0 && <span className="font-mono text-xs text-ink">{facts.join(" · ")}</span>}
       {entry.missing === "price" && !pending && <span className="text-[13px] text-signal-ink">Price not set yet</span>}
       {entry.source === "inferred" && entry.quote && <span className="text-[13px] text-slate">From what you said: &ldquo;{entry.quote}&rdquo;</span>}
+      {!interest && mandate && <StandingYes entry={entry} controls={mandate} />}
       {pending && (
         <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={() => onDecide("confirmed")} className="min-h-10 rounded-full bg-ink px-4 text-sm font-semibold text-white">
@@ -62,6 +131,7 @@ export function AgentPanel({
   about = [],
   ready,
   onDecide,
+  mandate,
   footer,
 }: {
   name: string;
@@ -70,6 +140,7 @@ export function AgentPanel({
   about?: AboutNote[];
   ready: boolean;
   onDecide: (id: string, status: "confirmed" | "rejected") => void;
+  mandate?: MandateControls;
   footer?: React.ReactNode;
 }) {
   const score = readiness(intents, ready);
@@ -78,7 +149,7 @@ export function AgentPanel({
   const list = (entries: ProfileEntry[], interest = false) => (
     <ul className="flex flex-col gap-2" aria-live="polite">
       {entries.map((e) => (
-        <Entry key={e.id} entry={e} interest={interest} onDecide={(status) => onDecide(e.id, status)} />
+        <Entry key={e.id} entry={e} interest={interest} onDecide={(status) => onDecide(e.id, status)} mandate={mandate} />
       ))}
     </ul>
   );

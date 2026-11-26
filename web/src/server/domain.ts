@@ -54,6 +54,21 @@ export const Population = z.object({
 export type Population = z.infer<typeof Population>;
 
 // An intent held by the person using the app, with where it came from.
+// A standing yes: the person lets their agent accept offers for one intent within bounds they set, until a date.
+// Like a payment mandate (AP2's open mandate, Mastercard's spend controls), it's scoped, it expires, and it's tied
+// to a fingerprint of the intent as it was: change the intent and the standing yes no longer covers anything.
+export const Mandate = z.object({
+  // Seek: the most the agent may say yes to. Offer: the least. Never past the person's own limit.
+  price: z.number().nonnegative(),
+  until: z.string(),
+  at: z.string(),
+  // The intent as it was when the person said this (what, limit, times, format).
+  basis: z.string(),
+  // A fingerprint of everything above, kept with each yes it gives.
+  hash: z.string(),
+});
+export type Mandate = z.infer<typeof Mandate>;
+
 export const ProfileIntent = z.object({
   id: z.string(),
   // A deal has a price and gets negotiated. An interest is something to do with others and gets a room, not a price.
@@ -72,6 +87,7 @@ export const ProfileIntent = z.object({
   priority: z.number().int().min(1).optional(),
   // For lessons and services: a small group if it's cheaper, or one-to-one even if it costs more.
   prefers: z.enum(["group", "solo"]).optional(),
+  mandate: Mandate.optional(),
 });
 export type ProfileIntent = z.infer<typeof ProfileIntent>;
 
@@ -116,6 +132,11 @@ export type ProfileEntry = {
   source: ProfileIntent["provenance"];
   quote: string;
   shared: string;
+  // For the standing-yes control: the limit, its unit and side, and the standing yes in words when there is one.
+  direction: ProfileIntent["direction"];
+  limitValue: number | null;
+  unit: Unit;
+  standingYes: string | null;
 };
 
 // The person's profile, built from what they've said so far. One structure, used by the panel, the API and the agent.
@@ -149,6 +170,13 @@ export function profileOf(input: { name: string; intents: ProfileIntent[]; goals
     source: i.provenance,
     quote: i.evidence,
     shared: sharedLine(i),
+    direction: i.direction,
+    limitValue: isInterest(i) ? null : i.price,
+    unit: i.unit,
+    standingYes:
+      i.mandate && Date.parse(i.mandate.until) > Date.now()
+        ? `${i.direction === "seek" ? "up to" : "from"} ${formatPrice(i.mandate.price, i.unit)}, until ${new Date(i.mandate.until).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}`
+        : null,
   });
   const deals = ranked.filter((i) => !isInterest(i));
   const formats = [...new Set(live.flatMap((i) => (i.prefers ? [i.prefers] : [])))];
