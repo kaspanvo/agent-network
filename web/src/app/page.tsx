@@ -1,19 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 import { Brand } from "@/components/Brand";
-import hero from "../../public/images/city-sidewalk.jpg";
+import { AgentField } from "@/components/landing/AgentField";
 
 const shell = "mx-auto w-full max-w-6xl px-4 sm:px-6 lg:px-10";
-
-function Tag({ dot, children, align }: { dot: "live" | "signal" | "open"; children: React.ReactNode; align: string }) {
-  const dotClass = dot === "live" ? "bg-live" : dot === "signal" ? "bg-signal" : "border-2 border-dashed border-signal";
-  return (
-    <span className={`${align} inline-flex max-w-full items-center gap-2 rounded-full bg-white/95 px-3 py-2 font-mono text-xs text-ink shadow-[0_8px_24px_rgba(0,0,0,0.3)]`}>
-      <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${dotClass}`} />
-      {children}
-    </span>
-  );
-}
 
 export default function Landing() {
   return (
@@ -33,45 +22,30 @@ export default function Landing() {
       </header>
 
       <main>
-        <section className={`${shell} flex flex-col gap-6 pb-10 pt-12 sm:pt-20`}>
-          <span className="inline-flex items-center gap-2 self-start rounded-full border border-navy-700 px-3 py-1.5 font-mono text-xs tracking-wide text-mist">
-            <span aria-hidden="true" className="size-1.5 rounded-full bg-live" />
-            PILOT · LISBON
-          </span>
-          <h1 className="max-w-[16ch] text-balance font-display text-[clamp(2.5rem,6vw,4.5rem)] font-normal leading-[1.04] tracking-[-0.03em]">
-            Find the opportunities hiding between people
-          </h1>
-          <p className="max-w-[54ch] text-lg text-mist">
-            Tell your agent what you&apos;d be open to. It negotiates privately with other people&apos;s agents and brings back only what fits.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/inbox" className="rounded-full bg-white px-6 py-3.5 font-semibold text-ink hover:bg-cloud">
-              Send your agent
-            </Link>
-            <a href="#how" className="rounded-full border border-navy-600 px-6 py-3.5 font-medium hover:border-mist">
-              See how it works
-            </a>
-          </div>
-        </section>
-
-        <section aria-label="Agents at work among people on a city street" className={shell}>
-          <div className="relative isolate overflow-hidden rounded-2xl bg-navy-900">
-            <Image src={hero} alt="People going about their day on a busy city sidewalk" fill priority sizes="(min-width: 1152px) 1152px, 100vw" className="-z-10 object-cover object-[38%_50%]" placeholder="blur" />
-            <div aria-hidden="true" className="absolute inset-0 -z-10 bg-gradient-to-b from-navy-950/30 via-transparent to-navy-950/60" />
-            <div className="flex min-h-[540px] flex-col justify-between gap-5 p-4 sm:p-8">
-              <Tag dot="live" align="self-end">INTENT · learn Spanish · up to €15/h</Tag>
-              <Tag dot="signal" align="self-start">3 AGENTS · negotiating · round 2</Tag>
-              <Tag dot="open" align="self-center">MATCH · a Spanish group needs one more</Tag>
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div className="flex flex-col gap-0.5 rounded-xl bg-white px-4 py-3.5 text-ink shadow-[0_12px_32px_rgba(0,0,0,0.35)]">
-                  <span className="font-mono text-[10px] tracking-wider text-slate">EVERY MATCH IS NEGOTIATED</span>
-                  <span className="font-display text-2xl tracking-tight">€25 → €14 an hour</span>
-                  <span className="text-sm text-[#2457d6]">when three learners share a tutor</span>
-                </div>
-                <span className="text-[11px] text-white/85">Photo: Tat Linh Nguyen on Unsplash</span>
-              </div>
+        <section aria-labelledby="hero-title" className="relative isolate flex min-h-[720px] overflow-hidden border-b border-navy-700 min-[820px]:min-h-[max(640px,calc(100svh-70px))]">
+          <AgentField className="absolute inset-0 -z-20 block size-full" />
+          {/* Keeps the words readable: the figures stay on the right on wide screens, above the words on a phone. */}
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-t from-navy-950 from-35% via-navy-950/80 via-55% to-transparent to-75% min-[820px]:bg-gradient-to-r min-[820px]:from-25% min-[820px]:via-navy-950/55 min-[820px]:via-48% min-[820px]:to-70%" />
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(120%_90%_at_75%_45%,transparent_45%,var(--color-navy-950)_100%)]" />
+          <div className={`${shell} pointer-events-none flex flex-col justify-end gap-6 pb-14 pt-[300px] min-[820px]:justify-center min-[820px]:pb-24 min-[820px]:pt-16`}>
+            <h1 id="hero-title" className="max-w-[15ch] text-balance font-display text-[clamp(2.5rem,6vw,4.75rem)] font-normal leading-[1.03] tracking-[-0.03em]">
+              Find the opportunities hiding between people
+            </h1>
+            <p className="max-w-[46ch] text-lg text-mist">
+              Tell your agent what you&apos;d be open to. It negotiates privately with other people&apos;s agents and brings back only what fits.
+            </p>
+            <div className="pointer-events-auto flex flex-wrap gap-3">
+              <Link href="/inbox" className="rounded-full bg-white px-6 py-3.5 font-semibold text-ink hover:bg-cloud">
+                Send your agent
+              </Link>
+              <a href="#how" className="rounded-full border border-navy-600 px-6 py-3.5 font-medium hover:border-mist">
+                See how it works
+              </a>
             </div>
           </div>
+          <p className="pointer-events-none absolute bottom-5 right-6 hidden max-w-[34ch] text-right font-mono text-[11px] leading-relaxed text-dim min-[820px]:block">
+            each figure is someone&apos;s agent, taking shape from what they&apos;d be open to
+          </p>
         </section>
 
         <section className={`${shell} py-16 sm:py-24`}>
