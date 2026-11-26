@@ -3,6 +3,8 @@ import type Anthropic from "@anthropic-ai/sdk";
 import { allChecks } from "./audit";
 import { allDisclosures } from "./disclosure";
 import { isReady, isStale } from "./intake/profile";
+import { marked } from "./http";
+import { expiresAt } from "./privacy";
 import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
 import type { OpenMessage } from "./intake/openmodel";
 import type { AgentKey } from "./identity";
@@ -74,6 +76,10 @@ export type Session = {
   agentKey?: AgentKey;
   // Today's use against the person's daily quotas.
   usage?: { day: string; counts: Partial<Record<string, number>> };
+  // When the person last used their agent. It's deleted RETENTION_DAYS after this.
+  lastSeenAt?: string;
+  // When the person said they're 18 or over, before the agent was made.
+  adultAt?: string;
 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;
@@ -86,9 +92,11 @@ export function isSessionId(id: string | undefined | null): id is string {
 
 // A new person's private state. Where it's kept is up to the host: a file locally, the person's Durable Object on Cloudflare.
 export function createSession(name: string, id: string = uuid()): Session {
+  const now = new Date().toISOString();
   return {
     id,
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    lastSeenAt: now,
     name,
     history: [],
     chat: [],
@@ -117,14 +125,15 @@ export function upgradeSession(session: Session): Session {
 export function publicSession(session: Session) {
   return {
     name: session.name,
-    chat: session.chat,
+    // Agent turns carry `aiGenerated`, the same marker the live streams use.
+    chat: session.chat.map(marked),
     intents: session.intents,
     goals: session.goals ?? [],
     about: session.about ?? [],
     // The structured profile, built from all of the above.
     profile: profileOf(session),
     ready: session.ready,
-    run: session.run,
+    run: session.run && { ...session.run, events: session.run.events.map(marked) },
     decisions: session.decisions,
     recapConfirmed: session.recapConfirmed,
     log: session.log,
@@ -140,6 +149,8 @@ export function publicSession(session: Session) {
     // The agent's public identity: what its signatures can be checked against. Never the private key.
     agent: session.agentKey ? { id: session.agentKey.id, publicJwk: session.agentKey.publicJwk } : null,
     sources: session.sources ?? [],
+    // When the agent and everything it knows will be deleted if the person doesn't come back.
+    keptUntil: new Date(expiresAt(session)).toISOString(),
   };
 }
 export type PublicSession = ReturnType<typeof publicSession>;

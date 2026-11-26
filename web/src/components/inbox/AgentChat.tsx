@@ -175,7 +175,14 @@ export function AgentChat(props: {
     <section className="flex min-h-0 flex-1 flex-col" aria-label="Your agent">
       <ConversationHeader
         avatar={<AgentAvatar size={36} />}
-        title="Your agent"
+        title={
+          <span className="flex items-center gap-1.5">
+            Your agent
+            <span title="An AI agent that acts for you" className="rounded border border-line px-1 font-mono text-[10px] font-normal leading-4 tracking-wider text-slate">
+              AI
+            </span>
+          </span>
+        }
         subtitle={
           running ? (
             <span className="flex items-center gap-1.5 text-signal-ink">
@@ -205,7 +212,7 @@ export function AgentChat(props: {
                   {item.text}
                 </p>
               ) : (
-                <article key={item.id} className="group flex animate-rise gap-3">
+                <article key={item.id} data-ai-generated="true" className="group flex animate-rise gap-3">
                   <AgentAvatar />
                   <div className="flex min-w-0 flex-1 flex-col gap-3">
                     {item.text ? <p className="whitespace-pre-wrap pt-1 text-[17px] leading-relaxed">{item.text}</p> : !item.stopped && <Dots label="Your agent is typing" />}

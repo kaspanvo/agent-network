@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { formatPrice, isInterest, sharedLine, TIME_CONDITIONS, Unit, type ProfileIntent } from "../domain";
+import { cleared, formatPrice, isInterest, sharedLine, TIME_CONDITIONS, Unit, type ProfileIntent } from "../domain";
 import type { Session } from "../store";
+import { sensitiveIn, SENSITIVE_WORDS } from "../sensitive";
 import type { RecapItem, Widget } from "./types";
 
 export const SaveIntentInput = z.object({
@@ -73,10 +74,33 @@ export function saveIntent(session: Session, input: SaveIntentInput): ProfileInt
     // A standing yes stays with its intent; if the intent changed, its fingerprint no longer matches and it covers nothing.
     ...(existing?.mandate ? { mandate: existing.mandate } : {}),
   };
+  // Checked in code, whatever the model was told: something sensitive waits for the person's explicit yes. A yes
+  // already given carries over only while the intent is about the same kind of thing.
+  const sensitive = sensitiveIn(intent.summary, intent.evidence);
+  if (sensitive) {
+    intent.sensitive = sensitive;
+    if (existing?.consentAt && existing.sensitive === sensitive) intent.consentAt = existing.consentAt;
+  }
   // Something new to look for means the person should see the recap again before the agent goes out with it.
   if (!existing) session.recapConfirmed = false;
   session.intents = existing ? session.intents.map((i) => (i.id === intent.id ? intent : i)) : [...session.intents, intent];
   return intent;
+}
+
+export const MAX_NOTES = 20;
+
+// The one way a note about the person gets saved, whoever writes it (the model, the script, the either/or picks).
+// A note that says something sensitive is never kept: notes are for finding the right people, and nothing sensitive
+// is needed for that without the person's explicit yes, which notes don't ask for. Returns why it wasn't kept.
+export function addNote(session: Session, fact: string, evidence: string, id: string = randomUUID().slice(0, 8)): "saved" | "duplicate" | "full" | { sensitive: string } {
+  const clean = fact.trim().slice(0, 160);
+  const kind = sensitiveIn(clean, evidence);
+  if (kind) return { sensitive: SENSITIVE_WORDS[kind] };
+  const about = (session.about ??= []);
+  if (about.some((n) => n.fact.toLowerCase() === clean.toLowerCase())) return "duplicate";
+  if (about.length >= MAX_NOTES) return "full";
+  about.push({ id, fact: clean, evidence: evidence.trim().slice(0, 400), at: new Date().toISOString() });
+  return "saved";
 }
 
 export function setIntentPrice(session: Session, intentId: string, price: number): ProfileIntent | undefined {
@@ -95,14 +119,14 @@ export function setConditionsForAll(session: Session, conditions: string[]): Pro
 
 // Ready once there's something to go out with: a confirmed deal with a price, or a confirmed interest.
 export function isReady(session: Session): boolean {
-  return session.intents.some((i) => i.status === "confirmed" && (isInterest(i) || i.price !== null));
+  return session.intents.some((i) => i.status === "confirmed" && cleared(i) && (isInterest(i) || i.price !== null));
 }
 
 // Intents the agent will go out with, most important first.
 export function activeIntents(session: Session): ProfileIntent[] {
   return session.intents
     .map((intent, index) => ({ intent, index }))
-    .filter(({ intent }) => intent.status === "confirmed" && (isInterest(intent) || intent.price !== null))
+    .filter(({ intent }) => intent.status === "confirmed" && cleared(intent) && (isInterest(intent) || intent.price !== null))
     .sort((a, b) => (a.intent.priority ?? 99) - (b.intent.priority ?? 99) || a.index - b.index)
     .map(({ intent }) => intent);
 }

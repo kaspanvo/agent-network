@@ -4,14 +4,14 @@ import { listen, observe, persist, record, type Actor } from "./actor";
 import { formatPrice } from "./domain";
 import { checkIn, decide } from "./followup";
 import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
-import { jsonError, ndjson, rateLimited } from "./http";
+import { jsonError, marked, ndjson, rateLimited } from "./http";
 import { calibrationPairs, calibrationWidget, scoreCalibration, understandingOf } from "./intake/calibration";
 import { isReady, recapWidget, setIntentPrice } from "./intake/profile";
 import { OPENING_CHOICES, openingMessage } from "./intake/prompt";
 import { aboutEvent } from "./intake/tools";
 import { RECAP_CHANGE, RECAP_CONFIRMED, type IntakeEvent } from "./intake/types";
 import { DAILY, localCounter, spend, today, type Counter, type QuotaKind } from "./limits";
-import { localMarket, type Market } from "./market";
+import { localMarket, reporterKey, type Market } from "./market";
 import { agentModels, type Agents } from "./models";
 import { MAX_RENEGOTIATIONS, renegotiate, renegotiationsLeft } from "./negotiation/renegotiate";
 import { releaseNext, runAgent } from "./negotiation/run";
@@ -19,6 +19,8 @@ import type { AgentEvent } from "./negotiation/types";
 import { openPrivateRoom, sayInRoom } from "./rooms/reply";
 import { covers, makeMandate, mandateWords } from "./mandate";
 import { memberByName } from "./population";
+import { exportOf, forgetIntent, forgetNote, RETENTION_DAYS, touch } from "./privacy";
+import { SENSITIVE_WORDS } from "./sensitive";
 import { publicSession, SESSION_COOKIE } from "./store";
 import { clientIp, passesTurnstile, turnstileSiteKey } from "./turnstile";
 
@@ -38,6 +40,9 @@ export type Host = {
   counter?: Counter;
   // Where requests from people who aren't members are kept (to delete or correct something an agent said about them).
   privacyRequests?: (request: PrivacyRequest) => Promise<void>;
+  // Deletes the person's agent and everything it holds, now: the Durable Object's storage and alarms on Cloudflare,
+  // the file locally.
+  erase?: () => Promise<void>;
 };
 
 export const PrivacyRequest = z.object({
@@ -85,8 +90,13 @@ const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/session$/, handle: getSession },
   { method: "POST", pattern: /^\/api\/session$/, handle: startSession },
   { method: "DELETE", pattern: /^\/api\/session$/, handle: endSession },
+  { method: "GET", pattern: /^\/api\/session\/export$/, handle: exportSession },
   { method: "POST", pattern: /^\/api\/intake$/, handle: intake },
   { method: "PATCH", pattern: /^\/api\/intents\/([^/]+)$/, handle: setIntent },
+  { method: "DELETE", pattern: /^\/api\/intents\/([^/]+)$/, handle: forgetIntentRoute },
+  { method: "PUT", pattern: /^\/api\/intents\/([^/]+)\/consent$/, handle: giveConsent },
+  { method: "DELETE", pattern: /^\/api\/intents\/([^/]+)\/consent$/, handle: withdrawConsent },
+  { method: "DELETE", pattern: /^\/api\/about\/([^/]+)$/, handle: forgetNoteRoute },
   { method: "POST", pattern: /^\/api\/agent\/run$/, handle: run },
   { method: "GET", pattern: /^\/api\/agent\/events$/, handle: events },
   { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)$/, handle: decision },
@@ -145,15 +155,19 @@ async function sessionBody(host: Host, actor: Actor | undefined) {
   return { mode: agents.mode, model: agents.label, resting, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), session: actor ? publicSession(actor.session) : null };
 }
 
-async function getSession(_request: Request, host: Host) {
+async function getSession(request: Request, host: Host) {
   const actor = host.actor;
+  if (!actor) return Response.json(await sessionBody(host, actor));
   // A sweep on every visit, as lease-based task boards do, so a hold that ran out is settled even if no alarm fired.
-  if (actor && !actor.busy) {
+  let changed = touch(actor.session);
+  if (!actor.busy) {
     const lapsed = sweepHolds(actor.session);
     for (const event of lapsed) observe(actor, event);
-    if (lapsed.length) persist(actor);
+    changed ||= lapsed.length > 0;
   }
-  return Response.json(await sessionBody(host, actor));
+  if (changed) persist(actor);
+  // The cookie lasts as long as the agent is kept, counted from this visit.
+  return Response.json(await sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, RETENTION_DAYS * 24 * 60 * 60) } });
 }
 
 // A daily key per address, hashed with the day so no address is kept.
@@ -163,8 +177,10 @@ async function addressKey(request: Request): Promise<string> {
 }
 
 async function startSession(request: Request, host: Host) {
-  const input = await body(request, z.object({ name: z.string().trim().min(1).max(40), turnstile: z.string().max(2048).optional() }));
+  const input = await body(request, z.object({ name: z.string().trim().min(1).max(40), turnstile: z.string().max(2048).optional(), adult: z.boolean().optional() }));
   if (!input) return jsonError("Tell your agent your first name.", 400);
+  // Open is for adults: an agent negotiates and meets people for you.
+  if (input.adult !== true) return jsonError("Open is for people 18 and over. Tick the box to say you are.", 400);
   // A new session gets a fresh daily quota, so starting one is where bots are stopped: the bot check, a few new
   // agents per address a day, and a ceiling on new agents for the whole service.
   if (!(await passesTurnstile(input.turnstile, request))) return jsonError("We couldn't check you're a person. Reload the page and try again.", 403);
@@ -172,12 +188,79 @@ async function startSession(request: Request, host: Host) {
   if (!(await counter.take(await addressKey(request), DAILY.sessionsPerIp))) return jsonError("You've started several agents today. Come back tomorrow, or keep using the one you have.", 429);
   if (!(await counter.take("sessions", DAILY.sessions))) return jsonError("Open is full for today. Try again tomorrow.", 429);
   const actor = host.start(input.name);
+  actor.session.adultAt = new Date().toISOString();
   persist(actor);
-  return Response.json(await sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, 60 * 60 * 24 * 30) } });
+  return Response.json(await sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, RETENTION_DAYS * 24 * 60 * 60) } });
 }
 
-function endSession(request: Request) {
-  return Response.json({ ok: true }, { headers: { "Set-Cookie": sessionCookie(request, "", 0) } });
+// "Start over" deletes the agent and everything it holds, not just the cookie: right to erasure (GDPR Art. 17).
+async function endSession(request: Request, host: Host) {
+  if (host.actor?.busy) return jsonError("Your agent is still out. Wait for it to come back, then delete it.", 409);
+  if (host.actor && host.erase) await host.erase();
+  return Response.json({ ok: true, deleted: !!host.actor }, { headers: { "Set-Cookie": sessionCookie(request, "", 0) } });
+}
+
+function exportSession(_request: Request, host: Host) {
+  const actor = host.actor;
+  if (!actor) return jsonError("There's no agent to export.", 401);
+  const day = new Date().toISOString().slice(0, 10);
+  return new Response(JSON.stringify(exportOf(actor.session), null, 2), {
+    headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="open-my-data-${day}.json"`, "Cache-Control": "no-store" },
+  });
+}
+
+// "Forget this": removes the intent and every copy of the words in storage, the model's memory included.
+function forgetIntentRoute(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  if (actor.busy) return jsonError("Your agent is still out. Wait for it to come back.", 409);
+  if (!forgetIntent(actor.session, id!)) return jsonError("That's already gone.", 404);
+  persist(actor);
+  return Response.json(publicSession(actor.session));
+}
+
+function forgetNoteRoute(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  if (actor.busy) return jsonError("Your agent is still out. Wait for it to come back.", 409);
+  if (!forgetNote(actor.session, id!)) return jsonError("That's already gone.", 404);
+  persist(actor);
+  return Response.json(publicSession(actor.session));
+}
+
+// Explicit consent (GDPR Art. 9(2)(a)) to share an intent that says something sensitive. Given here, by the person,
+// never by the agent; taken back the same way, at any time.
+function giveConsent(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const intent = actor.session.intents.find((i) => i.id === id);
+  if (!intent) return jsonError("That intent no longer exists.", 404);
+  if (!intent.sensitive) return jsonError("This one doesn't need your agreement.", 400);
+  if (!intent.consentAt) {
+    intent.consentAt = new Date().toISOString();
+    // A yes to an inferred intent's sharing is a yes to the intent too.
+    intent.status = "confirmed";
+    record(actor, { kind: "you", by: "you", text: `You agreed your agent may share “${intent.summary}” with other agents in rooms, though it says something about ${SENSITIVE_WORDS[intent.sensitive]}` });
+    actor.session.recapConfirmed = false;
+    actor.session.ready = false;
+    actor.session.pendingNotes.push(`[App note: ${actor.session.name} agreed "${intent.summary}" may be shared. It can go out now, after the recap.]`);
+    persist(actor);
+  }
+  return Response.json(publicSession(actor.session));
+}
+
+function withdrawConsent(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const intent = actor.session.intents.find((i) => i.id === id);
+  if (!intent) return jsonError("That intent no longer exists.", 404);
+  if (intent.consentAt) {
+    delete intent.consentAt;
+    record(actor, { kind: "you", by: "you", text: `You took back your agent's permission to share “${intent.summary}”. It won't be used to find anyone from now on` });
+    actor.session.ready = actor.session.recapConfirmed && isReady(actor.session);
+    persist(actor);
+  }
+  return Response.json(publicSession(actor.session));
 }
 
 const IntakeInput = z.discriminatedUnion("kind", [
@@ -438,7 +521,7 @@ function events(request: Request, host: Host) {
     start(controller) {
       let open = true;
       const send = (id: number, event: AgentEvent | { type: "end" }) => {
-        if (open) controller.enqueue(encoder.encode(`id: ${id}\ndata: ${JSON.stringify(event)}\n\n`));
+        if (open) controller.enqueue(encoder.encode(`id: ${id}\ndata: ${JSON.stringify(marked(event))}\n\n`));
       };
       const close = () => {
         if (!open) return;
@@ -507,7 +590,7 @@ async function checkin(request: Request, host: Host, [id]: string[]) {
     // The market keeps a private count of matches that didn't happen, per member, so unreliable ones stop being offered.
     const others = (opportunity?.people ?? []).filter((name) => name !== actor.session.name).flatMap((name) => memberByName(name)?.id ?? []);
     const market = host.market ?? localMarket();
-    if (others.length) await market.report?.(others, input.answer);
+    if (others.length) await market.report?.(others, input.answer, await reporterKey(actor.session.id));
   });
 }
 

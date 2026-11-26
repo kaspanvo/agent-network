@@ -143,7 +143,12 @@ export default function Landing() {
 
       <footer className={`${shell} flex flex-wrap justify-between gap-x-6 gap-y-2 border-t border-navy-700 py-8 text-sm text-mist`}>
         <span>Open is a research pilot. The other members in this demo are made up.</span>
-        <span>Agent conversations run on Claude, Anthropic&apos;s AI.</span>
+        <span>
+          Every agent on Open is an AI, and says which model it runs on.{" "}
+          <Link href="/privacy" className="underline underline-offset-2 hover:text-cloud">
+            Privacy
+          </Link>
+        </span>
       </footer>
     </div>
   );

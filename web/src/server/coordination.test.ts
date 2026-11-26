@@ -190,20 +190,25 @@ describe("who sees what in a room", () => {
 });
 
 describe("private reliability", () => {
-  it("stops offering a member whose matches twice didn't happen, without telling anyone why", async () => {
-    const { localMarket, addStrikes } = await import("./market");
+  it("stops offering a member only once two different people said a match didn't happen", async () => {
+    const { localMarket, addStrikes, strikeCounts } = await import("./market");
     const { planThreads } = await import("./negotiation/plan");
     const { LISBON_PILOT } = await import("./population");
     const intent = { ...spanish, price: 30 };
-    const before = planThreads([intent], LISBON_PILOT).map((t) => t.counterpart.memberId);
-    expect(before).toContain("lucia");
-    const strikes = addStrikes(addStrikes({}, ["lucia"], "missed"), ["lucia"], "missed");
-    expect(addStrikes(strikes, ["lucia"], "again")).toEqual(strikes);
-    const after = planThreads([intent], LISBON_PILOT, strikes).map((t) => t.counterpart.memberId);
-    expect(after).not.toContain("lucia");
-    // Reported through the market interface, the count stays in the market.
+    const offered = (strikes: Parameters<typeof strikeCounts>[0]) => planThreads([intent], LISBON_PILOT, strikeCounts(strikes)).map((t) => t.counterpart.memberId);
+    expect(offered({})).toContain("lucia");
+    // One person, however often they report, can't pause anyone.
+    const liar = addStrikes(addStrikes(addStrikes({}, ["lucia"], "missed", "a"), ["lucia"], "missed", "a"), ["lucia"], "missed", "a");
+    expect(offered(liar)).toContain("lucia");
+    // A second, different person makes it two.
+    const two = addStrikes(liar, ["lucia"], "missed", "b");
+    expect(offered(two)).not.toContain("lucia");
+    // A later "it happened" from the same person takes their report back.
+    expect(offered(addStrikes(two, ["lucia"], "again", "b"))).toContain("lucia");
+    // Counts kept the old way couldn't tell one reporter from many: they're dropped.
+    expect(offered({ lucia: 5 })).toContain("lucia");
     const market = localMarket();
-    await market.report!(["lucia"], "missed");
+    await market.report!(["lucia"], "missed", "a");
     expect(typeof market.match).toBe("function");
   });
 });

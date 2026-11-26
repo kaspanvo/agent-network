@@ -70,6 +70,8 @@ export function InboxApp() {
   const [turnstileKey, setTurnstileKey] = useState<string | null>(null);
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileAttempt, setTurnstileAttempt] = useState(0);
+  // The person said they're 18 or over. Open is for adults.
+  const [adult, setAdult] = useState(false);
 
   const { run, running, busyRoom, decisions } = runs;
   // The agent is out on a run, as opposed to streaming one room's replies, a yes, or a check-in.
@@ -191,10 +193,10 @@ export function InboxApp() {
   const begin = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = nameDraft.trim();
-    if (!trimmed || (turnstileKey && !turnstileToken)) return;
+    if (!trimmed || !adult || (turnstileKey && !turnstileToken)) return;
     setStarting(true);
     try {
-      const { session } = await api.start(trimmed, turnstileToken ?? undefined);
+      const { session } = await api.start(trimmed, turnstileToken ?? undefined, adult);
       setName(session!.name);
       select(AGENT);
       await intake.send({ kind: "start" });
@@ -213,10 +215,41 @@ export function InboxApp() {
     if (session) intake.load(session);
   };
 
+  // Start over deletes the agent and everything it holds, so it asks first.
   const startOver = async () => {
-    await api.reset();
+    if (!window.confirm("Start over deletes your agent and everything it knows about you, right now: your conversation, limits, rooms and activity log. Download a copy first if you want one. This can't be undone.")) return;
+    try {
+      await api.reset();
+    } catch (err) {
+      intake.setError((err as Error).message);
+      return;
+    }
     window.history.replaceState(null, "", window.location.pathname);
     window.location.reload();
+  };
+
+  // Forgetting and consent change what the agent holds, its rooms and its log, so the whole session is reloaded.
+  const privately = async (call: () => Promise<PublicSession>) => {
+    try {
+      const session = await call();
+      setTrust(trustOf(session));
+      intake.load(session);
+      runs.load(session);
+    } catch (err) {
+      intake.setError((err as Error).message);
+    }
+  };
+  const privacy = {
+    onForget: (id: string) => {
+      if (!window.confirm("Forget this? Your agent deletes it, every room and proposal that came from it, and every copy of your words about it. This can't be undone.")) return;
+      if (selected?.startsWith(`${id}-`)) select(AGENT);
+      void privately(() => api.forgetIntent(id));
+    },
+    onForgetNote: (id: string) => {
+      if (!window.confirm("Forget this note? Your agent deletes it and every copy of your words about it. This can't be undone.")) return;
+      void privately(() => api.forgetNote(id));
+    },
+    onConsent: (id: string, share: boolean) => void privately(() => api.consent(id, share)),
   };
 
   const openPrivate = async (person: string) => {
@@ -343,17 +376,27 @@ export function InboxApp() {
               maxLength={40}
               className="min-h-12 min-w-0 flex-1 rounded-full border border-line bg-white px-4 outline-none focus:border-ink"
             />
-            <button type="submit" disabled={starting || !nameDraft.trim() || (!!turnstileKey && !turnstileToken)} className="min-h-12 rounded-full bg-ink px-6 font-semibold text-white disabled:opacity-40">
+            <button type="submit" disabled={starting || !nameDraft.trim() || !adult || (!!turnstileKey && !turnstileToken)} className="min-h-12 rounded-full bg-ink px-6 font-semibold text-white disabled:opacity-40">
               Start
             </button>
           </form>
+          <label className="flex min-h-11 items-center gap-3 text-sm">
+            <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} className="size-5 shrink-0 accent-ink" />
+            <span>
+              I&apos;m 18 or over, and I&apos;ve read{" "}
+              <a href="/privacy" target="_blank" rel="noopener" className="underline underline-offset-2">
+                how Open uses my data
+              </a>
+            </span>
+          </label>
           {turnstileKey && <TurnstileCheck siteKey={turnstileKey} action="start" attempt={turnstileAttempt} onToken={setTurnstileToken} />}
           <p className="text-xs text-slate">
             {mode === "claude"
               ? "Claude, Anthropic's AI, runs your agent."
               : mode === "open"
                 ? `${model ?? "An open model"}, an open model on Cloudflare Workers AI, runs your agent for now.`
-                : "This is the demo agent: a fixed script, no AI model."} You see and approve everything it notes and agrees.
+                : "This is the demo agent: a fixed script, no AI model."}{" "}
+            {mode !== "demo" && "It's an AI, and it tells other agents who it acts for. "}You see everything it notes, and nothing is agreed without your yes or a standing yes you set.
           </p>
           {intake.error && (
             <p role="alert" className="text-sm text-signal-ink">
@@ -471,6 +514,7 @@ export function InboxApp() {
                   activeId={run.activeId}
                   running={out}
                   onDecide={intake.decideIntent}
+                  privacy={privacy}
                   onSendOut={() => void sendOut()}
                   sentOut={sentOut}
                   mode={mode}

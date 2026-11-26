@@ -69,7 +69,7 @@ export function ConversationHeader({
   children,
 }: {
   avatar: React.ReactNode;
-  title: string;
+  title: React.ReactNode;
   subtitle: React.ReactNode;
   onBack: () => void;
   children?: React.ReactNode;

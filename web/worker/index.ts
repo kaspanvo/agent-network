@@ -32,8 +32,8 @@ export default {
       return agent.fetch(request);
     }
     const id = cookieOf(request, SESSION_COOKIE);
-    if (!isSessionId(id) || (request.method === "DELETE" && url.pathname === "/api/session")) {
-      // No agent yet, or leaving: nothing to wake.
+    if (!isSessionId(id)) {
+      // No agent yet: nothing to wake. (Leaving goes to the agent, which deletes itself.)
       // Still answers which model runs agents, so the first screen says it truthfully.
       return handleApi(request, {
         actor: undefined,

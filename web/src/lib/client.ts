@@ -82,8 +82,15 @@ async function* follow(after: number): AsyncGenerator<AgentEvent> {
 export const api = {
   follow: (after: number) => Promise.resolve(follow(after)),
   session: () => fetch("/api/session", { cache: "no-store" }).then(json<SessionResponse>),
-  start: (name: string, turnstile?: string) => post("/api/session", { name, ...(turnstile ? { turnstile } : {}) }).then(json<SessionResponse>),
+  // `adult`: the person said they're 18 or over.
+  start: (name: string, turnstile: string | undefined, adult: boolean) => post("/api/session", { name, adult, ...(turnstile ? { turnstile } : {}) }).then(json<SessionResponse>),
+  // Deletes the agent and everything it holds.
   reset: () => fetch("/api/session", { method: "DELETE" }).then(json<{ ok: true }>),
+  // Forgetting removes every copy in storage; each returns the session as it now is.
+  forgetIntent: (id: string) => fetch(`/api/intents/${id}`, { method: "DELETE" }).then(json<PublicSession>),
+  forgetNote: (id: string) => fetch(`/api/about/${id}`, { method: "DELETE" }).then(json<PublicSession>),
+  // Explicit consent to share something sensitive, and taking it back.
+  consent: (id: string, share: boolean) => (share ? post(`/api/intents/${id}/consent`, {}, "PUT") : fetch(`/api/intents/${id}/consent`, { method: "DELETE" })).then(json<PublicSession>),
   intake: (input: unknown, signal?: AbortSignal) =>
     fetch("/api/intake", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input), signal }).then((r) => lines<IntakeEvent>(r)),
   renegotiate: (threadId: string, limit: number) => post(`/api/rooms/${threadId}/renegotiate`, { limit }).then((r) => lines<AgentEvent>(r)),

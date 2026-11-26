@@ -2,7 +2,7 @@ import { isInterest, type ProfileIntent } from "../domain";
 import { compatible, listWords, timesOf } from "../negotiation/plan";
 import { LISBON_PILOT } from "../population";
 import type { Session } from "../store";
-import { activeIntents } from "./profile";
+import { activeIntents, addNote } from "./profile";
 import type { Widget } from "./types";
 
 // Before the agent acts, it shows a few either/or picks between real things on the network, having already guessed
@@ -113,9 +113,7 @@ export function scoreCalibration(session: Session, picks: Record<string, "a" | "
     const other = pair[picks[pair.id] === "a" ? "b" : "a"];
     if (intent) intent.evidence = `${intent.evidence}${intent.evidence ? " " : ""}Picked "${chosen.title}" over "${other.title}".`.trim();
     // And in the profile, where the person can see what their agent learned about them.
-    const about = (session.about ??= []);
-    const fact = `Picked “${chosen.title}” over “${other.title}”`;
-    if (about.length < 20 && !about.some((n) => n.fact === fact)) about.push({ id: `cal-${pair.id}`.slice(0, 40), fact: fact.slice(0, 160), evidence: "From the either/or picks", at: new Date().toISOString() });
+    addNote(session, `Picked “${chosen.title}” over “${other.title}”`, "From the either/or picks", `cal-${pair.id}`.slice(0, 40));
   }
   return session.calibration;
 }

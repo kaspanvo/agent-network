@@ -1,9 +1,8 @@
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readShared, type Reader } from "../tools/reader";
 import type { Session } from "../store";
 import { calibrationPairs, calibrationWidget } from "./calibration";
-import { isReady, recapWidget, saveIntent, SaveIntentInput } from "./profile";
+import { addNote, isReady, recapWidget, saveIntent, SaveIntentInput } from "./profile";
 import { activityFor, type ChatItem, type IntakeEvent, type Widget } from "./types";
 
 // The intake tools, the same for every model. Each model's agent turns these specs into its own tool format and
@@ -192,17 +191,19 @@ export async function runTool(ctx: ToolContext, name: string, input: unknown): P
     const intent = saveIntent(session, parsed.data);
     emit({ type: "intent", intent });
     note(activityFor(intent, isNew));
+    if (intent.sensitive && !intent.consentAt)
+      return ok({ ...intent, needs_consent: `Saved, but this says something sensitive, so it stays private: it won't go out, appear in the recap or be shared until ${session.name} explicitly agrees in their profile, where they can also forget it. Tell them that in a sentence; don't press them.` });
     return ok(intent);
   }
   if (name === "note_about_person") {
     const parsed = NoteInput.safeParse(input);
     if (!parsed.success) return fail(z.prettifyError(parsed.error));
     if (ABOUT_SOMEONE_ELSE.test(parsed.data.fact)) return fail("That's about someone else. Notes are only about the person you represent; leave other people out.");
-    const about = (session.about ??= []);
-    const same = about.find((n) => n.fact.toLowerCase() === parsed.data.fact.trim().toLowerCase());
-    if (!same) {
-      if (about.length >= 20) return fail("The profile already holds 20 notes. Keep only what helps find the right people.");
-      about.push({ id: randomUUID().slice(0, 8), fact: parsed.data.fact.trim(), evidence: parsed.data.evidence.trim(), at: new Date().toISOString() });
+    const result = addNote(session, parsed.data.fact, parsed.data.evidence);
+    if (typeof result === "object")
+      return fail(`That says something about ${result.sensitive}, which Open treats as sensitive and doesn't keep as a note. If it matters for finding the right people, save it as an intent instead: the person then decides in their profile whether it's ever shared.`);
+    if (result === "full") return fail("The profile already holds 20 notes. Keep only what helps find the right people.");
+    if (result === "saved") {
       emit(aboutEvent(session));
       note(`Noted · ${parsed.data.fact.trim()}`);
     }

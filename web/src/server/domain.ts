@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SENSITIVE_WORDS } from "./sensitive";
 
 export const Unit = z.enum(["hour", "month", "one-off"]);
 export type Unit = z.infer<typeof Unit>;
@@ -88,6 +89,10 @@ export const ProfileIntent = z.object({
   // For lessons and services: a small group if it's cheaper, or one-to-one even if it costs more.
   prefers: z.enum(["group", "solo"]).optional(),
   mandate: Mandate.optional(),
+  // A special category of personal data (health, beliefs, sexuality...) found in it by code. Such an intent never
+  // goes out until the person explicitly agrees, and they can take that back at any time.
+  sensitive: z.enum(["health", "sexuality", "religion", "politics", "ethnicity", "union"]).optional(),
+  consentAt: z.string().optional(),
 });
 export type ProfileIntent = z.infer<typeof ProfileIntent>;
 
@@ -95,6 +100,12 @@ export const TIME_CONDITIONS = ["mornings", "evenings", "weekends"] as const;
 
 export function isInterest(intent: Pick<ProfileIntent, "kind">): boolean {
   return intent.kind === "interest";
+}
+
+// False for an intent that says something sensitive and that the person hasn't agreed to share: it stays with their
+// agent and never reaches a room, the market or the recap.
+export function cleared(intent: Pick<ProfileIntent, "sensitive" | "consentAt">): boolean {
+  return !intent.sensitive || !!intent.consentAt;
 }
 
 // Interest tags the pilot knows, with the words people use for them.
@@ -137,6 +148,9 @@ export type ProfileEntry = {
   limitValue: number | null;
   unit: Unit;
   standingYes: string | null;
+  // "your health" when the intent says something sensitive, and whether the person agreed to share it.
+  sensitive: string | null;
+  consented: boolean;
 };
 
 // The person's profile, built from what they've said so far. One structure, used by the panel, the API and the agent.
@@ -177,6 +191,8 @@ export function profileOf(input: { name: string; intents: ProfileIntent[]; goals
       i.mandate && Date.parse(i.mandate.until) > Date.now()
         ? `${i.direction === "seek" ? "up to" : "from"} ${formatPrice(i.mandate.price, i.unit)}, until ${new Date(i.mandate.until).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}`
         : null,
+    sensitive: i.sensitive ? SENSITIVE_WORDS[i.sensitive] : null,
+    consented: !!i.consentAt,
   });
   const deals = ranked.filter((i) => !isInterest(i));
   const formats = [...new Set(live.flatMap((i) => (i.prefers ? [i.prefers] : [])))];

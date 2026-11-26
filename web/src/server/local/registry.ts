@@ -1,6 +1,6 @@
 import { makeActor, type Actor } from "../actor";
 import { createSession } from "../store";
-import { loadSession, saveSession } from "./files";
+import { deleteSession, loadSession, saveSession } from "./files";
 
 // Local stand-in for Cloudflare's Durable Object namespace: one actor per person id, kept in memory,
 // saved to a file, and dropped when idle (like a Durable Object hibernating). The next request wakes it from disk.
@@ -38,4 +38,10 @@ export function startActor(name: string): Actor {
   saveSession(actor.session);
   actors.set(actor.session.id, actor);
   return actor;
+}
+
+// Deletes the person's agent: from memory and from disk.
+export async function eraseActor(id: string): Promise<void> {
+  actors.delete(id);
+  deleteSession(id);
 }

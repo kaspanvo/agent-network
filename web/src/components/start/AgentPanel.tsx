@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { formatPrice, profileOf, type AboutNote, type ProfileEntry, type ProfileIntent } from "@/server/domain";
+import { cleared, formatPrice, profileOf, type AboutNote, type ProfileEntry, type ProfileIntent } from "@/server/domain";
 import { Mark } from "../Brand";
 
 function readiness(intents: ProfileIntent[], ready: boolean): number {
   if (ready) return 100;
-  const live = intents.filter((i) => i.status !== "rejected");
+  // Something sensitive waiting for the person's yes can't go out yet, so it doesn't count.
+  const live = intents.filter((i) => i.status !== "rejected" && cleared(i));
   if (live.length === 0) return 10;
   const priced = live.some((i) => i.status === "confirmed" && (i.kind === "interest" || i.price !== null));
   const timed = live.some((i) => i.conditions.length > 0);
@@ -25,6 +26,39 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 export type MandateControls = { onSet: (id: string, price: number, days: number) => void; onDrop: (id: string) => void };
+
+// The person's rights over their profile: forget anything, and give or take back consent to share something sensitive.
+export type PrivacyControls = { onForget: (id: string) => void; onForgetNote: (id: string) => void; onConsent: (id: string, share: boolean) => void };
+
+// Something sensitive (health, beliefs, sexuality...) found in an intent by code. It's never shared until the person
+// says so here, and they can take that back.
+function Consent({ entry, privacy }: { entry: ProfileEntry; privacy: PrivacyControls }) {
+  if (!entry.sensitive) return null;
+  if (entry.consented)
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[13px] text-slate">
+        <span>You agreed this can be shared, though it says something about {entry.sensitive}.</span>
+        <button type="button" onClick={() => privacy.onConsent(entry.id, false)} className="min-h-9 font-medium text-ink underline underline-offset-2">
+          Take back
+        </button>
+      </div>
+    );
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-line bg-white p-3 text-[13px]">
+      <p>
+        This says something about <strong>{entry.sensitive}</strong>. Your agent keeps it to itself and won&apos;t use it to find anyone unless you say so. If you agree, other agents in rooms will hear: &ldquo;{entry.shared}&rdquo;
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => privacy.onConsent(entry.id, true)} className="min-h-10 rounded-full bg-ink px-4 font-semibold text-white">
+          Yes, it can be shared
+        </button>
+        <button type="button" onClick={() => privacy.onForget(entry.id)} className="min-h-10 rounded-full border border-[#d5d9e1] bg-white px-4">
+          Forget it
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // A standing yes for one deal: the agent may accept offers inside these bounds without asking, until the date.
 function StandingYes({ entry, controls }: { entry: ProfileEntry; controls: MandateControls }) {
@@ -91,7 +125,7 @@ function StandingYes({ entry, controls }: { entry: ProfileEntry; controls: Manda
   );
 }
 
-function Entry({ entry, interest, onDecide, mandate }: { entry: ProfileEntry; interest: boolean; onDecide: (status: "confirmed" | "rejected") => void; mandate?: MandateControls }) {
+function Entry({ entry, interest, onDecide, mandate, privacy }: { entry: ProfileEntry; interest: boolean; onDecide: (status: "confirmed" | "rejected") => void; mandate?: MandateControls; privacy?: PrivacyControls }) {
   const pending = entry.status === "pending";
   const facts = [
     interest ? "Rooms and plans, no money" : entry.limit ? `${entry.limit} · private` : null,
@@ -108,8 +142,9 @@ function Entry({ entry, interest, onDecide, mandate }: { entry: ProfileEntry; in
       {facts.length > 0 && <span className="font-mono text-xs text-ink">{facts.join(" · ")}</span>}
       {entry.missing === "price" && !pending && <span className="text-[13px] text-signal-ink">Price not set yet</span>}
       {entry.source === "inferred" && entry.quote && <span className="text-[13px] text-slate">From what you said: &ldquo;{entry.quote}&rdquo;</span>}
-      {!interest && mandate && <StandingYes entry={entry} controls={mandate} />}
-      {pending && (
+      {privacy && <Consent entry={entry} privacy={privacy} />}
+      {!interest && mandate && (!entry.sensitive || entry.consented) && <StandingYes entry={entry} controls={mandate} />}
+      {pending && !(entry.sensitive && privacy) && (
         <div className="flex flex-wrap gap-2 pt-1">
           <button type="button" onClick={() => onDecide("confirmed")} className="min-h-10 rounded-full bg-ink px-4 text-sm font-semibold text-white">
             Yes, that&apos;s right
@@ -118,6 +153,11 @@ function Entry({ entry, interest, onDecide, mandate }: { entry: ProfileEntry; in
             Not really
           </button>
         </div>
+      )}
+      {privacy && !(entry.sensitive && !entry.consented) && (
+        <button type="button" onClick={() => privacy.onForget(entry.id)} aria-label={`Forget ${entry.summary}`} className="min-h-9 self-end text-[13px] text-slate underline underline-offset-2 hover:text-ink">
+          Forget
+        </button>
       )}
     </li>
   );
@@ -132,6 +172,7 @@ export function AgentPanel({
   ready,
   onDecide,
   mandate,
+  privacy,
   footer,
 }: {
   name: string;
@@ -141,6 +182,7 @@ export function AgentPanel({
   ready: boolean;
   onDecide: (id: string, status: "confirmed" | "rejected") => void;
   mandate?: MandateControls;
+  privacy?: PrivacyControls;
   footer?: React.ReactNode;
 }) {
   const score = readiness(intents, ready);
@@ -149,7 +191,7 @@ export function AgentPanel({
   const list = (entries: ProfileEntry[], interest = false) => (
     <ul className="flex flex-col gap-2" aria-live="polite">
       {entries.map((e) => (
-        <Entry key={e.id} entry={e} interest={interest} onDecide={(status) => onDecide(e.id, status)} mandate={mandate} />
+        <Entry key={e.id} entry={e} interest={interest} onDecide={(status) => onDecide(e.id, status)} mandate={mandate} privacy={privacy} />
       ))}
     </ul>
   );
@@ -217,9 +259,16 @@ export function AgentPanel({
             <Section title="ALSO NOTED">
               <ul className="flex flex-col gap-1 text-[13px]">
                 {profile.about.map((n) => (
-                  <li key={n.id} className="rounded-lg border border-line px-2.5 py-1.5">
-                    <span>{n.fact}</span>
-                    {n.evidence && <span className="block text-slate">&ldquo;{n.evidence}&rdquo;</span>}
+                  <li key={n.id} className="flex items-start justify-between gap-2 rounded-lg border border-line px-2.5 py-1.5">
+                    <span>
+                      <span>{n.fact}</span>
+                      {n.evidence && <span className="block text-slate">&ldquo;{n.evidence}&rdquo;</span>}
+                    </span>
+                    {privacy && (
+                      <button type="button" onClick={() => privacy.onForgetNote(n.id)} aria-label={`Forget the note: ${n.fact}`} className="min-h-8 shrink-0 text-slate underline underline-offset-2 hover:text-ink">
+                        Forget
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>
@@ -231,8 +280,20 @@ export function AgentPanel({
       <ul className="flex flex-col gap-1.5 border-t border-line pt-3.5 text-[13px] text-slate">
         <li>Limits and notes stay private to your agent</li>
         <li>Never shares your name before you approve</li>
-        <li>Never accepts anything on your behalf</li>
+        <li>Never accepts anything you haven&apos;t allowed</li>
+        <li>Shares nothing sensitive without your yes</li>
       </ul>
+
+      {privacy && (
+        <p className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+          <a href="/api/session/export" download className="min-h-9 underline underline-offset-2">
+            Download my data
+          </a>
+          <a href="/privacy" className="min-h-9 text-slate underline underline-offset-2 hover:text-ink">
+            Privacy and your rights
+          </a>
+        </p>
+      )}
 
       {footer}
     </div>

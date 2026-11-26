@@ -1,4 +1,4 @@
-import { formatPrice, lowerFirst, type ProfileIntent } from "../domain";
+import { cleared, formatPrice, lowerFirst, type ProfileIntent } from "../domain";
 import { activeIntents, intentBasis } from "../intake/profile";
 import { pause } from "../pace";
 import { LISBON_PILOT } from "../population";
@@ -160,7 +160,7 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
   // Offers are heard in random order and compared before choosing, so being first gets nobody anywhere.
   // Matching happens in the market, which alone holds other members' sealed limits. Your agent only gets back the outcome.
   // At most this many agents per run, so one person's agent can't flood the network.
-  const threads = shuffled(await market.match(session.intents), session.id).slice(0, MAX_CONTACTS);
+  const threads = shuffled(await market.match(session.intents.filter(cleared)), session.id).slice(0, MAX_CONTACTS);
   const circles = planCircles(session.intents, LISBON_PILOT).filter((c) => c.members.length > 0);
   if (threads.length === 0 && circles.length === 0) {
     send({ type: "status", text: "Nobody in the pilot matches your intents yet. Your agent keeps listening as people join." });

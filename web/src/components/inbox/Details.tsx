@@ -1,6 +1,6 @@
 "use client";
 
-import { formatPrice, isInterest, lowerFirst, sharedLine, type AboutNote, type ProfileIntent, type Unit } from "@/server/domain";
+import { cleared, formatPrice, isInterest, lowerFirst, sharedLine, type AboutNote, type ProfileIntent, type Unit } from "@/server/domain";
 import type { Check } from "@/server/audit";
 import type { Opportunity } from "@/server/negotiation/types";
 import type { AgentMode } from "@/server/pace";
@@ -8,7 +8,7 @@ import type { Disclosure } from "@/server/disclosure";
 import type { LogActor, LogEntry } from "@/server/store";
 import { useState } from "react";
 import { NetworkGraph } from "../agent/NetworkGraph";
-import { AgentPanel, type MandateControls } from "../start/AgentPanel";
+import { AgentPanel, type MandateControls, type PrivacyControls } from "../start/AgentPanel";
 import { AgentAvatar, Avatar } from "./Avatar";
 import type { Shortlist, Thread } from "./runState";
 
@@ -152,7 +152,7 @@ function Knows({ intents, understanding, onForget }: { intents: ProfileIntent[];
         <ul className="flex flex-col gap-1">
           {active.map((i) => (
             <li key={i.id} className="flex items-start justify-between gap-2 rounded-lg bg-paper px-2.5 py-1.5 text-[13px]">
-              <span>{sharedLine(i)}</span>
+              <span>{cleared(i) ? sharedLine(i) : <span className="text-slate">Nothing yet: it says something sensitive, so it waits for your yes in your profile.</span>}</span>
               <button type="button" onClick={() => onForget(i.id)} aria-label={`Forget ${i.summary}`} className="min-h-7 shrink-0 text-slate underline underline-offset-2 hover:text-ink">
                 Forget
               </button>
@@ -200,6 +200,7 @@ export function AgentDetails(props: {
   goals: string[];
   about: AboutNote[];
   mandate: MandateControls;
+  privacy: PrivacyControls;
   ready: boolean;
   threads: Thread[];
   activeId: string | null;
@@ -223,6 +224,7 @@ export function AgentDetails(props: {
         goals={props.goals}
         about={props.about}
         mandate={props.mandate}
+        privacy={props.privacy}
         ready={props.ready}
         onDecide={props.onDecide}
         footer={
@@ -244,7 +246,7 @@ export function AgentDetails(props: {
           <NetworkGraph threads={props.threads} activeId={props.activeId} running={props.running} />
         </section>
       )}
-      <Knows intents={props.intents} understanding={props.understanding} onForget={(id) => props.onDecide(id, "rejected")} />
+      <Knows intents={props.intents} understanding={props.understanding} onForget={props.privacy.onForget} />
       <ActivityLog log={props.log} intact={props.logIntact} onOpenRoom={props.onOpenRoom} />
     </div>
   );

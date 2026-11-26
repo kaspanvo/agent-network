@@ -4,7 +4,7 @@ import { INTEREST_TAGS, isInterest, lowerFirst, type ProfileIntent } from "../do
 import { pause } from "../pace";
 import type { Session } from "../store";
 import { calibrationPairs, calibrationWidget } from "./calibration";
-import { activeIntents, isReady, recapWidget, saveIntent, setConditionsForAll, setTopPriority } from "./profile";
+import { activeIntents, addNote, isReady, recapWidget, saveIntent, setConditionsForAll, setTopPriority } from "./profile";
 import { aboutEvent } from "./tools";
 import { OPENING_CHOICES } from "./prompt";
 import { activityFor, type ChatItem, type IntakeAgent, type IntakeEvent, type Widget } from "./types";
@@ -90,15 +90,12 @@ const NOTES: { match: RegExp; fact: (m: RegExpMatchArray) => string }[] = [
 ];
 
 function notesFrom(session: Session, text: string): string[] {
-  const about = (session.about ??= []);
   const added: string[] = [];
   for (const { match, fact } of NOTES) {
     const m = text.match(match);
     if (!m) continue;
     const f = fact(m);
-    if (about.some((n) => n.fact === f)) continue;
-    about.push({ id: randomUUID().slice(0, 8), fact: f, evidence: sentenceWith(text, match), at: new Date().toISOString() });
-    added.push(f);
+    if (addNote(session, f, sentenceWith(text, match)) === "saved") added.push(f);
   }
   return added;
 }
@@ -253,7 +250,7 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
         if (intent && reason) {
           intent.evidence = `${intent.evidence} Reason: ${reason.toLowerCase()}.`;
           const side = picks[pair.id];
-          (session.about ??= []).push({ id: randomUUID().slice(0, 8), fact: `Chooses on: ${lowerFirst(reason)}`, evidence: side ? `Picked “${pair[side].title}”` : "", at: new Date().toISOString() });
+          addNote(session, `Chooses on: ${lowerFirst(reason)}`, side ? `Picked “${pair[side].title}”` : "");
           emit(aboutEvent(session));
         }
         if (intent) note(`Learned · ${reason}`);

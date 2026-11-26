@@ -63,6 +63,8 @@ export function claudeFor(role: Role, counter?: Counter): Anthropic {
       // Each agent turn is unique; the gateway's exact-match cache would only ever serve stale words.
       "cf-aig-skip-cache": "true",
       "cf-aig-max-attempts": "2",
+      // People's conversations aren't kept in the gateway's logs: it counts calls and cost without storing what was said.
+      "cf-aig-collect-log": "false",
     },
   });
 }
@@ -77,14 +79,14 @@ export const OPEN_MODEL = {
 } as const;
 
 // The part of the Workers AI binding Open uses.
-export type AiBinding = { run(model: string, input: Record<string, unknown>, options?: { gateway?: { id: string } }): Promise<unknown> };
+export type AiBinding = { run(model: string, input: Record<string, unknown>, options?: { gateway?: { id: string; collectLog?: boolean } }): Promise<unknown> };
 
 // Each call logs its model, time, cost and which tools it called: never anything the person said.
 export function workersAiChat(ai: AiBinding): ChatModel {
   return async (request) => {
     const started = Date.now();
     // Through AI Gateway when one is set: its logs, and a rate limit set in the dashboard on top of Open's own.
-    const options = env.OPEN_WORKERS_AI_GATEWAY ? { gateway: { id: env.OPEN_WORKERS_AI_GATEWAY } } : undefined;
+    const options = env.OPEN_WORKERS_AI_GATEWAY ? { gateway: { id: env.OPEN_WORKERS_AI_GATEWAY, collectLog: false } } : undefined;
     const response = (await ai.run(OPEN_MODEL.model, { ...request, chat_template_kwargs: { enable_thinking: false } }, options)) as ChatResponse;
     const calls = response.choices[0]?.message.tool_calls?.map((c) => c.function.name) ?? [];
     console.log(JSON.stringify({ at: "workers-ai", model: OPEN_MODEL.model, ms: Date.now() - started, neurons: Math.round(response.usage?.neurons ?? 0), calls }));

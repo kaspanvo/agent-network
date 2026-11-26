@@ -5,6 +5,7 @@ import { checkInDue } from "../src/server/followup";
 import { lapse, type Wake } from "../src/server/holds";
 import type { Market } from "../src/server/market";
 import { agentModels } from "../src/server/models";
+import { expired, expiresAt } from "../src/server/privacy";
 import { createSession, upgradeSession, type Session } from "../src/server/store";
 import { browserRunSource } from "./browser";
 import { budgetCounter } from "./budget";
@@ -34,6 +35,30 @@ export class PersonAgent extends Agent<Env> {
       run: (parts.run ?? null) as Session["run"],
     };
     this.actor = makeActor(upgradeSession(session), (s) => this.save(s));
+    // Kept RETENTION_DAYS after last use, then deleted. Agents made before expiry existed get their check now.
+    if (expired(this.actor.session)) return this.erase();
+    // Idempotent: an agent that already has its check keeps it, instead of gaining one per restart.
+    await this.schedule(new Date(expiresAt(this.actor.session)), "expire", undefined, { idempotent: true });
+  }
+
+  // Deletes the person's data at once, then the rest of the object (its scheduled wakes, the SDK's own tables) in a
+  // fresh alarm invocation of its own, so the teardown can't be cut short by the request that asked for it ending.
+  private async erase() {
+    void this.sql`DELETE FROM session_parts`;
+    this.actor = undefined;
+    await this.schedule(1, "selfDestruct");
+  }
+
+  async selfDestruct() {
+    await this.destroy();
+  }
+
+  // Fires when the agent would be past its keep-until date. If the person came back meanwhile, it checks again later.
+  async expire() {
+    const actor = this.actor;
+    if (!actor) return;
+    if (expired(actor.session)) return this.erase();
+    await this.schedule(new Date(expiresAt(actor.session)), "expire");
   }
 
   private save(session: Session) {
@@ -49,7 +74,7 @@ export class PersonAgent extends Agent<Env> {
 
   private market(): Market {
     const stub = this.env.MARKET.getByName(COMMUNITY);
-    return { match: (intents) => stub.match(intents), report: (memberIds, outcome) => stub.report(memberIds, outcome) };
+    return { match: (intents) => stub.match(intents), report: (memberIds, outcome, reporter) => stub.report(memberIds, outcome, reporter) };
   }
 
   async onRequest(request: Request): Promise<Response> {
@@ -60,10 +85,12 @@ export class PersonAgent extends Agent<Env> {
         // A fresh object for a fresh person: the Worker routes every new session to a new id.
         if (this.actor) throw new Error("This agent already belongs to someone.");
         this.actor = makeActor(createSession(name, this.name), (s) => this.save(s));
+        void this.schedule(new Date(expiresAt(this.actor.session)), "expire");
         return this.actor;
       },
       market: this.market(),
       privacyRequests: (r) => this.env.MARKET.getByName(COMMUNITY).keepPrivacyRequest(r),
+      erase: () => this.erase(),
       counter: this.counter,
       agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI, this.counter),
       // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,

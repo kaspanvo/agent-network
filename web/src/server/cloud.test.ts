@@ -43,7 +43,7 @@ const at = (path: string, init?: RequestInit) => new Request(`http://localhost:3
 describe("one API for Next.js and the Durable Object", () => {
   it("starts a session, sets the cookie and saves through the host", async () => {
     const host = memoryHost();
-    const response = await handleApi(at("/api/session", { method: "POST", body: JSON.stringify({ name: "Ana" }) }), host);
+    const response = await handleApi(at("/api/session", { method: "POST", body: JSON.stringify({ name: "Ana", adult: true }) }), host);
     expect(response.status).toBe(200);
     expect(response.headers.get("set-cookie")).toContain(`open_sid=${host.actor!.session.id}`);
     expect(response.headers.get("set-cookie")).not.toContain("Secure");

@@ -184,8 +184,18 @@ function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineIt
     <div className={`flex animate-rise gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
       <span className="w-8 shrink-0">{!sameSpeaker && (person ? <Avatar name={you} /> : mine ? <AgentAvatar /> : <Avatar name={m.who.replace(/'s agent$/, "")} />)}</span>
       <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${mine ? "items-end" : "items-start"}`}>
-        {!sameSpeaker && <span className="text-[13px] font-medium text-slate">{person ? "You" : mine ? "Your agent" : m.who}</span>}
-        <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] ${bubble}`}>
+        {!sameSpeaker && (
+          <span className="flex items-center gap-1.5 text-[13px] font-medium text-slate">
+            {person ? "You" : mine ? "Your agent" : m.who}
+            {/* EU AI Act Art. 50: say it's an AI where the conversation happens, not only in the small print. */}
+            {!person && (
+              <span title="An AI agent, acting for a person" className="rounded border border-line px-1 font-mono text-[10px] leading-4 tracking-wider">
+                AI
+              </span>
+            )}
+          </span>
+        )}
+        <div data-ai-generated={person ? undefined : "true"} className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-[15px] ${bubble}`}>
           <p className={`whitespace-pre-wrap ${m.withheld ? "italic opacity-80" : ""}`}>{m.text}</p>
           {m.card && <CardView card={m.card} mine={mine} />}
           {label && <span className={`mt-1 block font-mono text-[11px] tracking-wide ${mine ? "text-haze" : "text-slate"}`}>{label}</span>}
@@ -269,7 +279,7 @@ export function RoomChat(props: {
   const deal = thread.mode === "deal";
   // A limit can be changed twice per room (the server holds the same rule), so nobody can probe the other side's.
   const canChange = !!limit && thread.timeline.filter((t) => t.kind === "note" && t.text.endsWith("Your agent reopens the conversation.")).length < 2;
-  const people = [...thread.others.map((o) => `${o}'s agent`), "your agent"].join(", ");
+  const people = `${[...thread.others.map((o) => `${o}'s agent`), "your agent"].join(", ")} · AI agents`;
   const youSpoke = thread.timeline.some((t) => t.kind === "message" && t.event.from === "person");
   const price = opportunity ? priceOf(opportunity) : null;
   const followup = opportunity ? followupOf(thread, opportunity.id) : { checkInDue: false, done: undefined };
@@ -306,6 +316,7 @@ export function RoomChat(props: {
                   ? `A room for people into ${lowerFirst(thread.about)}`
                   : `Your agent found ${thread.who}'s agent`}
             </SystemLine>
+            <p className="-mt-2 text-center text-[12px] text-slate">Every agent here is an AI acting for one person. Only messages marked You are a person.</p>
             {showWhy && (
               <div className="mx-auto flex flex-col items-center gap-1">
                 <Reasoning>{thread.why}</Reasoning>

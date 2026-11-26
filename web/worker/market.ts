@@ -15,10 +15,10 @@ export class MarketAgent extends DurableObject<Env> {
     return matchInMarket(intents, (await this.ctx.storage.get<Strikes>("strikes")) ?? {});
   }
 
-  // Private reliability: a count per member of check-ins that said the match didn't happen. Never shown to anyone.
-  async report(memberIds: string[], outcome: CheckIn): Promise<void> {
+  // Private reliability: per member, who said a match with them didn't happen. Never shown to anyone.
+  async report(memberIds: string[], outcome: CheckIn, reporter: string): Promise<void> {
     const strikes = (await this.ctx.storage.get<Strikes>("strikes")) ?? {};
-    await this.ctx.storage.put("strikes", addStrikes(strikes, memberIds, outcome));
+    await this.ctx.storage.put("strikes", addStrikes(strikes, memberIds, outcome, reporter));
   }
 
   // Requests from people who aren't members, about something an agent said about them. Kept in this community's

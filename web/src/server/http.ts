@@ -5,6 +5,14 @@ import { limitBehind } from "./limits";
 import type { AgentEvent } from "./negotiation/types";
 import { signUnsigned } from "./identity";
 
+// EU AI Act Art. 50: what an AI agent wrote is marked as AI-generated, in a form machines can read as well as people.
+// Messages from agents in rooms, and the setup agent's words as they stream.
+export function marked<T>(event: T): T {
+  const e = event as { type?: string; from?: string; role?: string };
+  const ai = (e.type === "message" && (e.from === "you" || e.from === "them")) || e.type === "text" || e.role === "agent";
+  return ai ? { ...event, aiGenerated: true } : event;
+}
+
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
 }
@@ -40,7 +48,7 @@ export function ndjson<E extends Loggable>(
         if (event.type !== "done" && event.type !== "error") observe(actor, event as Loggable);
         // Work that holds the agent (a run) can be followed live from another tab or after a reload.
         if (busy && "type" in event) broadcast(actor, event as AgentEvent);
-        if (open) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        if (open) controller.enqueue(encoder.encode(`${JSON.stringify(marked(event))}\n`));
       };
       if (busy) actor.busy = busy;
       try {

@@ -91,7 +91,7 @@ describe("each person's daily quota", () => {
 describe("starting new agents", () => {
   const start = (counter: Counter, ip: string) =>
     handleApi(
-      new Request("http://localhost:3000/api/session", { method: "POST", headers: { "x-forwarded-for": ip }, body: JSON.stringify({ name: "Ana" }) }),
+      new Request("http://localhost:3000/api/session", { method: "POST", headers: { "x-forwarded-for": ip }, body: JSON.stringify({ name: "Ana", adult: true }) }),
       { actor: undefined, start: (name) => makeActor(createSession(name), () => {}), counter },
     );
 
