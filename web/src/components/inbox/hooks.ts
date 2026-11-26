@@ -13,7 +13,13 @@ export function useIntake() {
   const [intents, setIntents] = useState<ProfileIntent[]>([]);
   const [goals, setGoals] = useState<string[]>([]);
   const [about, setAbout] = useState<AboutNote[]>([]);
-  const [ready, setReady] = useState(false);
+  const [ready, setReadyState] = useState(false);
+  // The same, readable at the end of a turn without waiting for a render.
+  const readyNow = useRef(false);
+  const setReady = useCallback((value: boolean) => {
+    readyNow.current = value;
+    setReadyState(value);
+  }, []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -24,7 +30,7 @@ export function useIntake() {
     setGoals(session.goals);
     setAbout(session.about);
     setReady(session.ready);
-  }, []);
+  }, [setReady]);
 
   const apply = (event: IntakeEvent) => {
     const onItem = (id: string, change: (m: ChatItem) => ChatItem) => setChat((c) => c.map((m) => (m.id === id ? change(m) : m)));
@@ -52,9 +58,9 @@ export function useIntake() {
   };
 
   // `echo` is what the person sees as their own message; `answeredId` closes the widget they used.
-  // Resolves true when this turn made the agent ready to go out.
+  // Resolves true when the agent is ready to go out at the end of this turn.
   const send = async (input: unknown, echo?: string, answeredId?: string): Promise<boolean> => {
-    let becameReady = false;
+    let becameReady = readyNow.current;
     const controller = new AbortController();
     abort.current = controller;
     setBusy(true);
@@ -80,8 +86,8 @@ export function useIntake() {
 
   const stop = () => abort.current?.abort();
 
-  // Asks the agent to show the recap again, without a message from the person.
-  const refresh = () => send({ kind: "refresh" });
+  // Asks the app to show the recap (or the either/or picks) again, without a message from the person.
+  const refresh = (what: "recap" | "calibration" = "recap") => send({ kind: "refresh", what });
 
   const decideIntent = async (id: string, status: "confirmed" | "rejected") => {
     try {
@@ -110,8 +116,8 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
     if (session.run) setRun(session.run.events.reduce(reduce, emptyRun));
   }, []);
 
-  // Returns what the server said it needs first ("recap"), when it refused for a reason the app can fix itself.
-  const stream = async (events: Promise<AsyncGenerator<AgentEvent | { type: "done" }>>, room: string | null = null): Promise<string | undefined> => {
+  // Returns the refusal when the server said it needs something first ("recap", "calibration", "understanding").
+  const stream = async (events: Promise<AsyncGenerator<AgentEvent | { type: "done" }>>, room: string | null = null): Promise<ApiError | undefined> => {
     setRunning(true);
     setBusyRoom(room);
     try {
@@ -122,7 +128,7 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
         onEvent?.(event);
       }
     } catch (err) {
-      if (err instanceof ApiError && err.needs) return err.needs;
+      if (err instanceof ApiError && err.needs) return err;
       setRun((s) => ({ ...s, error: (err as Error).message }));
     } finally {
       setRunning(false);
@@ -144,10 +150,10 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
     }
   };
 
-  const start = async () => {
+  const start = async (anyway = false) => {
     setRun(emptyRun);
     setDecisions({});
-    return stream(api.run());
+    return stream(api.run(anyway));
   };
 
   const renegotiate = async (threadId: string, limit: number) => {

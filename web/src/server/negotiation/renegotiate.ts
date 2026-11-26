@@ -8,6 +8,16 @@ import type { Narrator } from "./narrator";
 import { dealMessages, opportunityFor, runStats } from "./run";
 import type { AgentEvent } from "./types";
 
+// A limit can be changed twice per room. Reopening a room again and again would let someone narrow down what the
+// other side would accept, one yes or no at a time.
+export const MAX_RENEGOTIATIONS = 2;
+const REOPENED = "Your agent reopens the conversation.";
+
+export function renegotiationsLeft(session: Session, threadId: string): number {
+  const used = (session.run?.events ?? []).filter((e) => e.type === "note" && e.threadId === threadId && e.text.endsWith(REOPENED)).length;
+  return Math.max(0, MAX_RENEGOTIATIONS - used);
+}
+
 // The person changes their limit inside a room. Their agent reopens that one conversation from scratch.
 // A new agreement becomes the next version of the proposal and any earlier approval of it no longer counts.
 export async function renegotiate(session: Session, threadId: string, limit: number, narrator: Narrator, emit: (event: AgentEvent) => void, market: Market = localMarket()): Promise<void> {
@@ -26,7 +36,7 @@ export async function renegotiate(session: Session, threadId: string, limit: num
   const thread = (await market.match([intent])).find((t) => t.id === threadId);
   if (!thread) throw new Error("That conversation can't be reopened.");
 
-  send({ type: "note", threadId, text: `You set a new ${intent.direction === "seek" ? "limit" : "floor"} of ${fmt(limit)}. Your agent reopens the conversation.` });
+  send({ type: "note", threadId, text: `You set a new ${intent.direction === "seek" ? "limit" : "floor"} of ${fmt(limit)}. ${REOPENED}` });
   await pause(700);
 
   if (thread.moves.length > 0) {

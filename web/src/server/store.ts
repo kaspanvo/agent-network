@@ -5,7 +5,7 @@ import { allDisclosures } from "./disclosure";
 import { isReady, isStale } from "./intake/profile";
 import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
 import type { OpenMessage } from "./intake/openmodel";
-import type { Calibration } from "./intake/calibration";
+import { understandingOf, type Calibration } from "./intake/calibration";
 import type { ChatItem } from "./intake/types";
 import type { PageFacts } from "./tools/reader";
 import type { AgentEvent, CheckIn, Opportunity, Outcome } from "./negotiation/types";
@@ -131,7 +131,7 @@ export function publicSession(session: Session) {
     // Proposals agreed under an intent the person has since changed. They can be declined, not approved.
     stale: (session.run?.opportunities ?? []).filter((o) => isStale(session, o)).map((o) => o.id),
     // How well the agent read the person: only the score, never its guesses.
-    understanding: session.calibration?.agreed !== undefined ? { agreed: session.calibration.agreed, total: session.calibration.pairs.length } : null,
+    understanding: understandingOf(session.calibration),
     followups: session.followups,
     sources: session.sources ?? [],
   };

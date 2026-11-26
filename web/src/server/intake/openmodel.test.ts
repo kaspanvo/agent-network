@@ -81,6 +81,17 @@ describe("the agent on an open model", () => {
     const { events } = await turn(failing, "[App note: start]", session);
     expect(events.find((e) => e.type === "widget")).toMatchObject({ widget: { kind: "choices", multiple: true } });
     expect(session.openHistory?.map((m) => m.role)).toEqual(["user", "assistant"]);
+    // The person is told the script answered, on that message.
+    expect(events.some((e) => e.type === "activity" && e.text.startsWith("Answered by the simple script"))).toBe(true);
+  });
+
+  it("says when today's AI budget is why the script answered", async () => {
+    const { BudgetExceeded } = await import("../limits");
+    const overBudget: ChatModel = async () => {
+      throw new BudgetExceeded("AI");
+    };
+    const { events } = await turn(overBudget, "[App note: start]");
+    expect(events.some((e) => e.type === "activity" && e.text.includes("back at 00:00 UTC"))).toBe(true);
   });
 });
 

@@ -5,7 +5,7 @@ import { checksFor } from "./audit";
 import type { ProfileIntent } from "./domain";
 import { decide } from "./followup";
 import { guard, WITHHELD } from "./guard";
-import { calibrationPairs, scoreCalibration } from "./intake/calibration";
+import { calibrationPairs, MAX_PAIRS, scoreCalibration, understandingOf } from "./intake/calibration";
 import { scriptedNarrator, type Narrator } from "./negotiation/narrator";
 import { runAgent } from "./negotiation/run";
 import type { AgentEvent } from "./negotiation/types";
@@ -31,8 +31,27 @@ describe("the privacy check on outgoing messages", () => {
     ["Ana would like lessons, evenings", false],
     ["Write to ana@example.com", true],
     ["Call me on +351 912 345 678", true],
+    // Said another way.
+    ["She'd go to fifteen euros an hour", true],
+    ["Somewhere around 14 an hour works for her", true],
+    ["Anything between 12 and 16 per hour", true],
+    ["We can get close to her limit", true],
+    ["His budget is flexible, let's see", true],
+    ["She won't pay more than that", true],
+    // Not leaks: other numbers, times, group sizes, far-off amounts.
+    ["A group of 4 meets on Tuesdays at 18:00", false],
+    ["Classes run for 12 weeks, evenings", false],
+    ["The course costs €40 for the whole term", false],
   ])("%s → withheld: %s", (text, withheld) => {
     expect(guard(text, [15]).withheld).toBe(withheld);
+  });
+
+  it("lets the price Open's matcher announced be repeated, since it's already public", () => {
+    expect(guard("Agreed at €14 an hour, see you Tuesday", [15], { allowed: [14] }).withheld).toBe(false);
+    expect(guard("Agreed at €14 an hour, see you Tuesday", [15]).withheld).toBe(true);
+    // When the price happens to equal the limit, saying it as a limit still counts.
+    expect(guard("Agreed at €15 an hour", [15], { allowed: [15] }).withheld).toBe(false);
+    expect(guard("She could go up to 15", [15], { allowed: [15] }).withheld).toBe(true);
   });
 
   it("withholds an agent line that leaks a limit, even when the model wrote it", async () => {
@@ -80,12 +99,31 @@ describe("checking the agent's read of the person", () => {
   it("guesses from what was said, scores the picks and keeps what it got wrong", () => {
     const session = createSession("Ana");
     session.intents = [{ ...jazz }];
-    const [pair] = calibrationPairs(session);
-    expect(pair).toMatchObject({ a: { title: "Jazz jam session" }, predicted: "a" });
+    const pair = calibrationPairs(session).find((p) => p.a.title === "Jazz jam session" && p.b.title.startsWith("Fado night"));
+    expect(pair).toMatchObject({ predicted: "a" });
     session.calibration = { pairs: [pair!] };
     const result = scoreCalibration(session, { [pair!.id]: "b" });
     expect(result).toMatchObject({ agreed: 0, missed: [pair!.id] });
     expect(session.intents[0]!.evidence).toContain(`Picked "Fado night with Rita's group" over "Jazz jam session"`);
+  });
+
+  it("asks enough picks to tell a real read from a coin toss, closest calls first, and is honest about the score", () => {
+    const session = createSession("Ana");
+    session.intents = [{ ...jazz }, { ...spanish }];
+    const pairs = calibrationPairs(session);
+    expect(pairs.length).toBeGreaterThan(3);
+    expect(pairs.length).toBeLessThanOrEqual(MAX_PAIRS);
+    expect(new Set(pairs.map((p) => p.intentId))).toEqual(new Set(["j1", "s1"]));
+    session.calibration = { pairs };
+    // Getting only half right is no better than chance, and low enough that the agent asks before going out.
+    const picks = Object.fromEntries(pairs.map((p, i) => [p.id, i % 2 ? p.predicted : p.predicted === "a" ? "b" : "a"]));
+    scoreCalibration(session, picks);
+    expect(understandingOf(session.calibration)).toMatchObject({ betterThanChance: false, low: true });
+    // Getting them all right is.
+    scoreCalibration(session, Object.fromEntries(pairs.map((p) => [p.id, p.predicted])));
+    expect(understandingOf(session.calibration)).toMatchObject({ agreed: pairs.length, betterThanChance: true, low: false });
+    // What it got wrong goes in the profile too.
+    expect(session.about?.some((n) => n.fact.startsWith("Picked “"))).toBe(true);
   });
 
   it("never shows a member's price in the picks", () => {

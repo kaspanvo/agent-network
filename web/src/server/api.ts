@@ -5,7 +5,7 @@ import { formatPrice } from "./domain";
 import { checkIn, decide } from "./followup";
 import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
 import { jsonError, ndjson, rateLimited } from "./http";
-import { scoreCalibration } from "./intake/calibration";
+import { calibrationPairs, calibrationWidget, scoreCalibration, understandingOf } from "./intake/calibration";
 import { isReady, recapWidget, setIntentPrice } from "./intake/profile";
 import { OPENING_CHOICES, openingMessage } from "./intake/prompt";
 import { aboutEvent } from "./intake/tools";
@@ -13,7 +13,7 @@ import { RECAP_CHANGE, RECAP_CONFIRMED, type IntakeEvent } from "./intake/types"
 import { DAILY, localCounter, spend, today, type Counter, type QuotaKind } from "./limits";
 import { localMarket, type Market } from "./market";
 import { agentModels, type Agents } from "./models";
-import { renegotiate } from "./negotiation/renegotiate";
+import { MAX_RENEGOTIATIONS, renegotiate, renegotiationsLeft } from "./negotiation/renegotiate";
 import { runAgent } from "./negotiation/run";
 import type { AgentEvent } from "./negotiation/types";
 import { openPrivateRoom, sayInRoom } from "./rooms/reply";
@@ -115,15 +115,17 @@ function agentsOf(host: Host): Agents {
   return host.agents ?? agentModels();
 }
 
-function sessionBody(host: Host, actor: Actor | undefined) {
+async function sessionBody(host: Host, actor: Actor | undefined) {
   const agents = agentsOf(host);
-  // Which model runs the agents, so the person can see their agent isn't a weaker tier than anyone else's.
+  // Which model runs the agents, so the person can see their agent isn't a weaker tier than anyone else's, and
+  // `resting` when today's AI budget is spent and the simple script answers for everyone.
   // `busy` tells a reopened page that the agent is still out, so it can follow the run live.
   // `turnstile` is the site key when new sessions need a bot check.
-  return { mode: agents.mode, model: agents.label, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), session: actor ? publicSession(actor.session) : null };
+  const resting = await agents.resting().catch(() => false);
+  return { mode: agents.mode, model: agents.label, resting, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), session: actor ? publicSession(actor.session) : null };
 }
 
-function getSession(_request: Request, host: Host) {
+async function getSession(_request: Request, host: Host) {
   const actor = host.actor;
   // A sweep on every visit, as lease-based task boards do, so a hold that ran out is settled even if no alarm fired.
   if (actor && !actor.busy) {
@@ -131,7 +133,7 @@ function getSession(_request: Request, host: Host) {
     for (const event of lapsed) observe(actor, event);
     if (lapsed.length) persist(actor);
   }
-  return Response.json(sessionBody(host, actor));
+  return Response.json(await sessionBody(host, actor));
 }
 
 // A daily key per address, hashed with the day so no address is kept.
@@ -151,7 +153,7 @@ async function startSession(request: Request, host: Host) {
   if (!(await counter.take("sessions", DAILY.sessions))) return jsonError("Open is full for today. Try again tomorrow.", 429);
   const actor = host.start(input.name);
   persist(actor);
-  return Response.json(sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, 60 * 60 * 24 * 30) } });
+  return Response.json(await sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, 60 * 60 * 24 * 30) } });
 }
 
 function endSession(request: Request) {
@@ -164,7 +166,7 @@ const IntakeInput = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choices"), itemId: z.string(), picked: z.array(z.string()).min(1).max(8) }),
   z.object({ kind: z.literal("number"), itemId: z.string(), value: z.number().finite() }),
   z.object({ kind: z.literal("recap"), itemId: z.string(), answer: z.enum(["confirm", "change"]) }),
-  z.object({ kind: z.literal("refresh") }),
+  z.object({ kind: z.literal("refresh"), what: z.enum(["recap", "calibration"]).optional() }),
   z.object({ kind: z.literal("pairs"), itemId: z.string(), picks: z.record(z.string(), z.enum(["a", "b"])) }),
 ]);
 
@@ -184,6 +186,21 @@ async function intake(request: Request, host: Host) {
   if (input.kind === "start") {
     if (session.chat.length > 0) return jsonError("This conversation has already started.", 409);
     userText = openingMessage(session.name);
+  } else if (input.kind === "refresh" && input.what === "calibration") {
+    // The either/or picks, shown by the app itself when the person wants to go out and the agent never asked them.
+    const pairs = calibrationPairs(session);
+    if (!pairs.length) return jsonError("There's nothing on the network to compare yet.", 409);
+    if (session.calibration?.picks) return jsonError("Those picks have already been answered.", 409);
+    session.calibration = { pairs };
+    const item = { id: randomUUID(), role: "agent" as const, text: "One last check before I go out. I've already guessed which of each you'd pick. Let's see if I've read you right.", widget: calibrationWidget(pairs) };
+    session.chat.push(item);
+    session.pendingNotes.push(`[App note: the app showed ${session.name} the either/or picks. Their answers come next.]`);
+    persist(actor);
+    return ndjson<IntakeEvent>(actor, async (emit) => {
+      emit({ type: "agent_start", itemId: item.id });
+      emit({ type: "text", itemId: item.id, delta: item.text });
+      emit({ type: "widget", itemId: item.id, widget: item.widget });
+    });
   } else if (input.kind === "refresh") {
     // The app shows the recap again itself, after the person changed what their agent will look for or tried to send it
     // out unchecked. No model is asked, so it can't be skipped; the agent hears about it with the next message.
@@ -291,24 +308,35 @@ async function setIntent(request: Request, host: Host, [id]: string[]) {
   return Response.json({ intents: session.intents, ready: session.ready, recapNeeded });
 }
 
-function run(_request: Request, host: Host) {
+async function run(request: Request, host: Host) {
   const actor = host.actor;
   if (!actor) return jsonError("Set up your agent first.", 401);
   const limited = rateLimited(actor);
   if (limited) return limited;
   const { session } = actor;
+  const input = (await body(request, z.object({ anyway: z.boolean().optional() }))) ?? {};
   if (!isReady(session)) return jsonError("Give your agent something to go out with first: an interest, or a deal with a price.", 409);
   if (!session.recapConfirmed) return Response.json({ error: "Your agent needs you to check the recap first.", needs: "recap" }, { status: 409 });
+  // Most of what goes wrong between agents starts with one that misread its person (Project Swap, 2026), so before
+  // going out the agent checks its guesses at the person's picks, and says so when it got too many wrong.
+  if (calibrationPairs(session).length && !session.calibration?.picks)
+    return Response.json({ error: "Your agent wants to check it has read you right first.", needs: "calibration" }, { status: 409 });
+  const understanding = understandingOf(session.calibration);
+  if (understanding?.low && !input.anyway)
+    return Response.json({ error: `Your agent guessed ${understanding.agreed} of ${understanding.total} of your picks right.`, needs: "understanding", agreed: understanding.agreed, total: understanding.total }, { status: 409 });
   if (actor.busy) return jsonError("Your agent is already out. Wait for it to come back.", 409);
   const over = quota(actor, "runs");
   if (over) return over;
-  const narrator = agentsOf(host).narrator();
+  const agents = agentsOf(host);
+  const narrator = agents.narrator();
+  // Everyone in a run speaks through the same model, and the person is told which.
+  const who = (await agents.resting().catch(() => false)) || !agents.label ? "Every agent here follows the same simple script today" : `Every agent here speaks through ${agents.label}, the same for everyone`;
   session.decisions = {};
   session.followups = {};
   return ndjson<AgentEvent>(
     actor,
     async (emit) => {
-      await runAgent(session, narrator, emit, host.market ?? localMarket());
+      await runAgent(session, narrator, emit, host.market ?? localMarket(), who);
       scheduleHolds(session, host.wake);
     },
     "run",
@@ -428,6 +456,7 @@ async function renegotiateRoom(request: Request, host: Host, [id]: string[]) {
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to finish.", 409);
   const input = await body(request, z.object({ limit: z.number().finite().positive().max(100000) }));
   if (!input) return jsonError("Choose a new limit.", 400);
+  if (renegotiationsLeft(actor.session, id!) === 0) return jsonError(`You've changed your limit in this room ${MAX_RENEGOTIATIONS} times. It stays as it is now, so nobody can narrow down what the other side would accept.`, 409);
   const over = quota(actor, "renegotiations");
   if (over) return over;
   const intent = actor.session.intents.find((i) => id!.startsWith(`${i.id}-`));

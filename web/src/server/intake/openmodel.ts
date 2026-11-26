@@ -90,6 +90,16 @@ function recent(history: OpenMessage[]): OpenMessage[] {
   return history.slice(start);
 }
 
+// When the script answers instead of the model, the person is told, on that very message. A weaker agent quietly
+// standing in is how people end up worse off without noticing (Project Deal, 2026).
+export function scriptStoodIn(session: Session, emit: (event: IntakeEvent) => void, overBudget: boolean): void {
+  const item = session.chat.at(-1);
+  if (item?.role !== "agent") return;
+  const text = overBudget ? "Answered by the simple script · Open's AI is back at 00:00 UTC" : "Answered by the simple script · Open's AI didn't respond";
+  item.activity = [...(item.activity ?? []), text];
+  emit({ type: "activity", itemId: item.id, text });
+}
+
 export function openModelIntakeAgent(model: ChatModel, fallback: IntakeAgent, reader?: Reader): IntakeAgent {
   const tools = openTools(!!reader);
   return {
@@ -111,6 +121,7 @@ export function openModelIntakeAgent(model: ChatModel, fallback: IntakeAgent, re
         console.warn("Open model unavailable, the script takes this turn:", err instanceof Error ? err.message : err);
         history.pop();
         await fallback.respond(session, userText, emit, signal);
+        scriptStoodIn(session, emit, err instanceof Error && err.name === "BudgetExceeded");
         const said = session.chat.at(-1);
         history.push({ role: "user", content: userText }, { role: "assistant", content: said?.role === "agent" ? said.text : "" });
         return;

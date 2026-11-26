@@ -4,7 +4,8 @@ import type { AgentMode } from "@/server/pace";
 import type { PublicSession } from "@/server/store";
 
 // `turnstile` is the site key when starting a session needs Cloudflare's bot check.
-export type SessionResponse = { mode: AgentMode; model: string | null; busy: string | null; turnstile: string | null; session: PublicSession | null };
+// `resting` is true when today's AI budget is spent and the simple script answers for everyone until 00:00 UTC.
+export type SessionResponse = { mode: AgentMode; model: string | null; resting: boolean; busy: string | null; turnstile: string | null; session: PublicSession | null };
 
 // A refusal from the server: its words for the person, and `needs` when the app can fix it itself ("recap").
 export class ApiError extends Error {
@@ -12,14 +13,16 @@ export class ApiError extends Error {
     message: string,
     readonly status: number,
     readonly needs?: string,
+    // The rest of the refusal, such as how many picks the agent got right.
+    readonly detail: Record<string, unknown> = {},
   ) {
     super(message);
   }
 }
 
 async function refusal(response: Response): Promise<ApiError> {
-  const body = (await response.json().catch(() => ({}))) as { error?: string; needs?: string };
-  return new ApiError(body.error ?? `Request failed (${response.status})`, response.status, body.needs);
+  const body = (await response.json().catch(() => ({}))) as { error?: string; needs?: string } & Record<string, unknown>;
+  return new ApiError(body.error ?? `Request failed (${response.status})`, response.status, body.needs, body);
 }
 
 async function json<T>(response: Response): Promise<T> {
@@ -88,7 +91,8 @@ export const api = {
   openPrivate: (name: string) => post("/api/rooms/private", { name }).then((r) => lines<AgentEvent>(r)),
   setIntent: (id: string, status: "confirmed" | "rejected") =>
     post(`/api/intents/${id}`, { status }, "PATCH").then(json<{ intents: PublicSession["intents"]; ready: boolean; recapNeeded: boolean }>),
-  run: () => fetch("/api/agent/run", { method: "POST" }).then((r) => lines<AgentEvent>(r)),
+  // `anyway`: go out even though the agent got many of the person's picks wrong, because they said so.
+  run: (anyway = false) => post("/api/agent/run", anyway ? { anyway } : {}).then((r) => lines<AgentEvent>(r)),
   // `version` is the version on screen: if the proposal changed since, the server refuses rather than apply the answer to new terms.
   decide: (id: string, decision: "approved" | "declined", version?: number) => post(`/api/opportunities/${id}`, { decision, version }).then((r) => lines<AgentEvent>(r)),
   hold: (id: string) => post(`/api/opportunities/${id}/hold`, {}).then((r) => lines<AgentEvent>(r)),

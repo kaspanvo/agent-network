@@ -69,7 +69,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 // What the agent will do once it's out, shown before it goes, so the person can approve the plan rather than discover it.
-function PlanCard({ intents, understanding, onSend, onChange }: { intents: ProfileIntent[]; understanding: { agreed: number; total: number } | null; onSend: () => void; onChange: () => void }) {
+function PlanCard({ intents, understanding, onSend, onChange }: { intents: ProfileIntent[]; understanding: { agreed: number; total: number; betterThanChance: boolean } | null; onSend: () => void; onChange: () => void }) {
   const active = intents
     .filter((i) => i.status === "confirmed" && (isInterest(i) || i.price !== null))
     .sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
@@ -96,6 +96,7 @@ function PlanCard({ intents, understanding, onSend, onChange }: { intents: Profi
       {understanding && (
         <p className="text-sm text-haze">
           I guessed {understanding.agreed} of {understanding.total} of your picks{understanding.agreed < understanding.total ? ", and noted what I missed" : ""}.
+          {!understanding.betterThanChance && " That's not enough to be sure I know you yet; tell me more any time."}
         </p>
       )}
       <div className="flex flex-wrap gap-2">
@@ -142,8 +143,12 @@ export function AgentChat(props: {
   onStop: () => void;
   onDecideIntent: (id: string, status: "confirmed" | "rejected") => void;
   onSendOut: () => void;
+  // Set when the agent got too many of the person's picks wrong and asks before going out.
+  lowFit: { agreed: number; total: number } | null;
+  onSendAnyway: () => void;
+  onTellMore: () => void;
   onOpenRoom: (id: string) => void;
-  understanding: { agreed: number; total: number } | null;
+  understanding: { agreed: number; total: number; betterThanChance: boolean } | null;
   onBack: () => void;
   onDetails: () => void;
 }) {
@@ -283,7 +288,24 @@ export function AgentChat(props: {
               </p>
             )}
 
-            {ready && !sentOut && !busy && <PlanCard intents={intents} understanding={props.understanding} onSend={props.onSendOut} onChange={() => sendText("I want to change something.")} />}
+            {props.lowFit && !sentOut && !busy && (
+              <div role="alert" className="flex animate-rise flex-col gap-3 rounded-2xl border-[1.5px] border-dashed border-signal-light bg-[#fff7f3] p-4 sm:ml-11">
+                <span className="font-mono text-[11px] tracking-wider text-signal-ink">YOUR AGENT ISN&apos;T SURE IT KNOWS YOU YET</span>
+                <p className="text-[15px] leading-relaxed">
+                  It guessed {props.lowFit.agreed} of {props.lowFit.total} of your picks right, so it may bring you things that don&apos;t fit. A little more about what you want usually fixes that.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={props.onTellMore} className="min-h-11 rounded-full bg-ink px-5 text-sm font-semibold text-white">
+                    Tell it more
+                  </button>
+                  <button type="button" onClick={props.onSendAnyway} className="min-h-11 rounded-full border border-[#d5d9e1] bg-white px-5 text-sm">
+                    Send it anyway
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {ready && !sentOut && !busy && !props.lowFit && <PlanCard intents={intents} understanding={props.understanding} onSend={props.onSendOut} onChange={() => sendText("I want to change something.")} />}
 
             {sentOut && (
               <div className="flex animate-rise flex-col gap-3 rounded-2xl border border-line bg-white p-4 sm:ml-11">

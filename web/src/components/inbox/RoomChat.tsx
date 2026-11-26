@@ -267,6 +267,8 @@ export function RoomChat(props: {
   const { ref, showJump, jump } = useStickToBottom(`${thread.id}:${thread.timeline.length}:${live}`);
   const status = statusOf(thread, busy ? undefined : opportunity ? [opportunity] : [], decision ? { [opportunity!.id]: decision } : {});
   const deal = thread.mode === "deal";
+  // A limit can be changed twice per room (the server holds the same rule), so nobody can probe the other side's.
+  const canChange = !!limit && thread.timeline.filter((t) => t.kind === "note" && t.text.endsWith("Your agent reopens the conversation.")).length < 2;
   const people = [...thread.others.map((o) => `${o}'s agent`), "your agent"].join(", ");
   const youSpoke = thread.timeline.some((t) => t.kind === "message" && t.event.from === "person");
   const price = opportunity ? priceOf(opportunity) : null;
@@ -411,7 +413,7 @@ export function RoomChat(props: {
                               ? `You approved version ${opportunity.version}. Waiting for the others to say yes.`
                               : "You're in. Waiting for the others to say yes."}
                     </p>
-                    {limit && (
+                    {canChange && (
                       <button type="button" onClick={() => setEditing(true)} className="min-h-10 text-sm font-medium underline underline-offset-2">
                         Change my limit
                       </button>
@@ -424,7 +426,7 @@ export function RoomChat(props: {
                     <button type="button" onClick={() => props.onDecide(opportunity.id, "approved")} className={`min-h-12 flex-1 whitespace-nowrap rounded-full bg-ink px-5 font-semibold text-white ${limit ? "max-sm:basis-full" : ""}`}>
                       {price ? `Approve version ${opportunity.version}` : "I'm in"}
                     </button>
-                    {limit && (
+                    {canChange && (
                       <button type="button" onClick={() => setEditing(true)} disabled={busy} className="min-h-12 whitespace-nowrap rounded-full border border-[#d5d9e1] px-5 disabled:opacity-40 max-sm:flex-1">
                         Change my limit
                       </button>
@@ -443,7 +445,7 @@ export function RoomChat(props: {
               thread.status === "no_fit" && (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm text-slate">No deal at your current {limit?.direction === "offer" ? "floor" : "limit"}.</p>
-                  {limit && thread.timeline.some((t) => t.kind === "message") && (
+                  {canChange && thread.timeline.some((t) => t.kind === "message") && (
                     <button type="button" onClick={() => setEditing(true)} disabled={busy} className="min-h-11 rounded-full border border-[#d5d9e1] px-5 text-sm disabled:opacity-40">
                       Try a different limit
                     </button>

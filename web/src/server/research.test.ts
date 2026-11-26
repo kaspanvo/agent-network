@@ -125,7 +125,7 @@ describe("one live agent per person, with an activity log", () => {
   it("logs what the agent said in your name and to whom, but not what other agents said", async () => {
     const { actor } = await run([spanish]);
     const log = actor.session.log.map((l) => l.text);
-    expect(log).toContain("Sent your sealed offer to Open's matcher, not to Diego, Lena and Joana's agents");
+    expect(log.some((t) => /^Sent your sealed offer to Open's matcher, not to Diego, (Lena and Joana|Joana and Lena)'s agents$/.test(t))).toBe(true);
     expect(log.some((t) => /^Open's matcher set the price at €\d+\/h with Lucía's agent$/.test(t))).toBe(true);
     expect(log.some((t) => t.startsWith("Compared 2 offers for “Learn Spanish” and picked"))).toBe(true);
     expect(log.some((t) => t.startsWith("Brought you version 1"))).toBe(true);

@@ -1,5 +1,5 @@
 import { type Happening, type Intent, type Member, type Population, type ProfileIntent, isInterest, lowerFirst } from "../domain";
-import { compatible, listWords, timesOf } from "../negotiation/plan";
+import { bySeatFit, compatible, listWords, timesOf } from "../negotiation/plan";
 import type { AgentEvent, Card, Opportunity } from "../negotiation/types";
 
 // Paid offers worth mentioning in a circle, because they sit close to the interest.
@@ -32,7 +32,8 @@ export function planCircles(intents: ProfileIntent[], population: Population): C
     const sharing = population.interests.filter((i) => i.tag === intent.tag);
     const member = (id: string) => population.members.find((m) => m.id === id)!;
     const fits = sharing.filter((i) => compatible(yours, timesOf(i.conditions)));
-    const members = fits.slice(0, MAX_MEMBERS).map((i) => member(i.memberId));
+    // The members whose times overlap most join, ties drawn for this room, never the order they joined the pilot in.
+    const members = bySeatFit(fits, (i) => timesOf(i.conditions), yours, circleId(intent.id)).slice(0, MAX_MEMBERS).map((i) => member(i.memberId));
     const elsewhere = sharing.filter((i) => !fits.includes(i)).map((i) => member(i.memberId));
     const happenings = population.happenings.filter((h) => h.tag === intent.tag && members.some((m) => m.id === h.postedBy));
     // Something the person picked when their agent checked its guesses comes first, if it fits their times.

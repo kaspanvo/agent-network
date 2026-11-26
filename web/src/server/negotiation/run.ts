@@ -43,7 +43,7 @@ export const MATCHER = "Open's matcher";
 export function dealMessages(thread: ThreadPlan, lines: Line[], you: string): AgentEvent[] {
   return thread.moves.map((move, i) => {
     const line = lines[i]!;
-    const checked = move.from === "open" ? { text: line.text, withheld: false } : guard(line.text, [thread.limit, ...(thread.theirLimit !== undefined ? [thread.theirLimit] : [])]);
+    const checked = move.from === "open" ? { text: line.text, withheld: false } : guard(line.text, [thread.limit, ...(thread.theirLimit !== undefined ? [thread.theirLimit] : [])], { allowed: thread.agreedPrice !== null ? [thread.agreedPrice] : [] });
     return {
       type: "message",
       threadId: thread.id,
@@ -118,7 +118,8 @@ function optionOf(t: ThreadPlan): ShortlistOption {
   return { threadId: t.id, who: t.counterpart.name, price: t.agreedPrice!, unit: t.unit, group: t.kind === "group", schedule: t.schedule };
 }
 
-export async function runAgent(session: Session, narrator: Narrator, emit: (event: AgentEvent) => void, market: Market = localMarket()): Promise<void> {
+// `who` says which model every agent in this run speaks through, the same for everyone.
+export async function runAgent(session: Session, narrator: Narrator, emit: (event: AgentEvent) => void, market: Market = localMarket(), who?: string): Promise<void> {
   const you = session.name;
   const events: AgentEvent[] = [];
   const send = (event: AgentEvent) => {
@@ -127,7 +128,7 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
   };
   session.run = { at: new Date().toISOString(), events, opportunities: [] };
 
-  send({ type: "status", text: `Looking for agents in the ${LISBON_PILOT.name} whose intents fit yours` });
+  send({ type: "status", text: `Looking for agents in the ${LISBON_PILOT.name} whose intents fit yours${who ? `. ${who}` : ""}` });
   await pause(800);
   // Offers are heard in random order and compared before choosing, so being first gets nobody anywhere.
   // Matching happens in the market, which alone holds other members' sealed limits. Your agent only gets back the outcome.

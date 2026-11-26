@@ -51,6 +51,7 @@ export function InboxApp() {
   });
   const [mode, setMode] = useState<AgentMode | null>(null);
   const [model, setModel] = useState<string | null>(null);
+  const [resting, setResting] = useState(false);
   // What the server knows that the browser can't work out: the activity log, the per-room checks, stale proposals.
   const [trust, setTrust] = useState<Trust>(NO_TRUST);
   // A yes or no waits a few seconds before anyone is told, so it can be undone.
@@ -89,9 +90,10 @@ export function InboxApp() {
     window.addEventListener("popstate", onPop);
     api
       .session()
-      .then(({ mode, model, busy, turnstile, session }) => {
+      .then(({ mode, model, resting, busy, turnstile, session }) => {
         setMode(mode);
         setModel(model);
+        setResting(resting);
         setTurnstileKey(turnstile);
         if (!session) return;
         setName(session.name);
@@ -168,12 +170,17 @@ export function InboxApp() {
   // Sending the agent out. If the recap needs another look first, the agent shows it, instead of a refusal.
   // When the person asked to go out but had to check the recap first, the agent goes as soon as they confirm it.
   const wantsOut = useRef(false);
-  const sendOut = async () => {
+  // The agent got too many of the person's picks wrong: it asks before going out.
+  const [lowFit, setLowFit] = useState<{ agreed: number; total: number } | null>(null);
+  const sendOut = async (anyway = false) => {
     wantsOut.current = false;
-    const needs = await runs.start();
-    if (needs === "recap") {
+    setLowFit(null);
+    const refused = await runs.start(anyway);
+    if (refused?.needs === "recap" || refused?.needs === "calibration") {
       wantsOut.current = true;
-      await intake.refresh();
+      await intake.refresh(refused.needs);
+    } else if (refused?.needs === "understanding") {
+      setLowFit({ agreed: Number(refused.detail.agreed), total: Number(refused.detail.total) });
     }
   };
   const sendToAgent = async (input: unknown, echo?: string, answeredId?: string) => {
@@ -311,14 +318,14 @@ export function InboxApp() {
   if (!loaded)
     return (
       <div className="flex h-dvh flex-col">
-        <AppHeader label="YOUR INBOX" mode={mode} />
+        <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
       </div>
     );
 
   if (!name)
     return (
       <div className="flex min-h-dvh flex-col">
-        <AppHeader label="YOUR INBOX" mode={mode} />
+        <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-5 px-4 py-10">
           <AgentAvatar size={52} />
           <h1 className="font-display text-3xl tracking-tight">Hi, I&apos;m your agent on Open</h1>
@@ -362,7 +369,7 @@ export function InboxApp() {
 
   return (
     <div className="flex h-dvh flex-col">
-      <AppHeader label="YOUR INBOX" mode={mode}>
+      <AppHeader label="YOUR INBOX" mode={mode} resting={resting}>
         <button type="button" onClick={startOver} className="min-h-11 px-2 text-sm text-mist hover:text-cloud">
           Start over
         </button>
@@ -416,7 +423,13 @@ export function InboxApp() {
               onSend={sendToAgent}
               onStop={intake.stop}
               onDecideIntent={intake.decideIntent}
-              onSendOut={sendOut}
+              onSendOut={() => void sendOut()}
+              lowFit={lowFit}
+              onSendAnyway={() => void sendOut(true)}
+              onTellMore={() => {
+                setLowFit(null);
+                void sendToAgent({ kind: "text", text: "Let me tell you more about what I'm after." }, "Let me tell you more about what I'm after.");
+              }}
               onOpenRoom={select}
               understanding={trust.understanding}
               onBack={() => select(null)}
@@ -457,7 +470,7 @@ export function InboxApp() {
                   activeId={run.activeId}
                   running={out}
                   onDecide={intake.decideIntent}
-                  onSendOut={sendOut}
+                  onSendOut={() => void sendOut()}
                   sentOut={sentOut}
                   mode={mode}
                   model={model}

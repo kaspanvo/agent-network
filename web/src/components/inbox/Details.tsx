@@ -135,7 +135,7 @@ function ActivityLog({ log, intact, onOpenRoom }: { log: LogEntry[]; intact: boo
 }
 
 // What the agent knows about the person, split by who gets to see it, with a way to make it forget.
-function Knows({ intents, understanding, onForget }: { intents: ProfileIntent[]; understanding: { agreed: number; total: number } | null; onForget: (id: string) => void }) {
+function Knows({ intents, understanding, onForget }: { intents: ProfileIntent[]; understanding: { agreed: number; total: number; betterThanChance: boolean } | null; onForget: (id: string) => void }) {
   const active = intents.filter((i) => i.status === "confirmed");
   if (active.length === 0) return null;
   return (
@@ -143,7 +143,8 @@ function Knows({ intents, understanding, onForget }: { intents: ProfileIntent[];
       <h3 className="font-mono text-[11px] tracking-wider text-slate">WHAT YOUR AGENT KNOWS</h3>
       {understanding && (
         <p className="text-sm">
-          It guessed <strong>{understanding.agreed} of {understanding.total}</strong> of your either/or picks before going out.
+          It guessed <strong>{understanding.agreed} of {understanding.total}</strong> of your either/or picks before going out
+          {understanding.betterThanChance ? ", clearly better than guessing." : ". That's not yet clearly better than guessing, so it may miss what you want."}
         </p>
       )}
       <div className="flex flex-col gap-1.5">
@@ -209,7 +210,7 @@ export function AgentDetails(props: {
   model: string | null;
   log: LogEntry[];
   logIntact: boolean;
-  understanding: { agreed: number; total: number } | null;
+  understanding: { agreed: number; total: number; betterThanChance: boolean } | null;
   onOpenRoom: (id: string) => void;
 }) {
   return (

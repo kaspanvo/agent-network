@@ -15,23 +15,43 @@ export function listWords(items: string[]): string {
 
 const UNIT_WORD: Record<Unit, string> = { hour: "per hour", month: "per month", "one-off": "as a one-off" };
 
-// Sealed offers. Each agent sends its person's limit to Open's matcher (this function) and nothing else.
-// If the limits overlap, the price lands at a random point in the middle of the overlap, so the price
-// alone never tells either side the other's limit. There are no rounds, so there's no trail of concessions to read.
-// Research on agent negotiation found models disclose their person's limit in 2-80% of episodes, and that limits
-// can be inferred from how offers move; keeping the number out of the model and out of the trajectory avoids both.
-export function settle(buyerMax: number, sellerFloor: number, seed: string, youAre: "buyer" | "seller") {
+// What other members of the community say something is worth: the median of their limits for the same thing and
+// unit. It never includes the person's own number.
+export function goingRate(population: Population, tag: string, unit: Unit): number | null {
+  const prices = population.intents.filter((i) => i.tag === tag && i.unit === unit).map((i) => i.price).sort((a, b) => a - b);
+  if (prices.length === 0) return null;
+  const mid = Math.floor(prices.length / 2);
+  return prices.length % 2 ? prices[mid]! : Math.round((prices[mid - 1]! + prices[mid]!) / 2);
+}
+
+// Sealed offers. Each agent sends its person's limit to Open's matcher (this function) and nothing else, and there
+// are no rounds, so there's no trail of concessions to read.
+//
+// The price never depends on the person's own limit: it comes from the other side and the community's going rate,
+// and the person's limit only decides yes or no. So nobody gains by understating what they'd pay or overstating
+// what they'd take; saying the true limit is always best, and shading it only loses deals. (A rule that splits the
+// overlap rewards shading, which kills deals that should happen.) The price also never lands exactly on the other
+// side's limit, so it doesn't give it away.
+export function settle(buyerMax: number, sellerFloor: number, ref: number | null, seed: string, youAre: "buyer" | "seller") {
   const them: Move["from"] = "them";
   const moves: Move[] = [
     { from: "you", action: "SEAL", amount: null },
     { from: them, action: "SEAL", amount: null },
   ];
-  if (buyerMax < sellerFloor) {
+  const margin = 0.03 + 0.07 * unitRandom(seed);
+  let price: number;
+  if (youAre === "buyer") {
+    // Their floor and the going rate set the price.
+    price = ref !== null && ref > sellerFloor ? ref : Math.max(sellerFloor + 1, Math.round(sellerFloor * (1 + margin)));
+  } else {
+    // Their limit and the going rate set the price.
+    price = ref !== null && ref < buyerMax ? ref : Math.min(buyerMax - 1, Math.round(buyerMax * (1 - margin)));
+  }
+  const fits = price <= buyerMax && price >= sellerFloor;
+  if (!fits) {
     moves.push({ from: "open", action: "NO_MATCH", amount: null });
     return { moves, price: null as number | null, youAre };
   }
-  const u = 0.35 + 0.3 * unitRandom(seed);
-  const price = Math.min(buyerMax, Math.max(sellerFloor, Math.round(sellerFloor + u * (buyerMax - sellerFloor))));
   moves.push({ from: "open", action: "MATCH", amount: price });
   return { moves, price: price as number | null, youAre };
 }
@@ -43,6 +63,17 @@ export function unitRandom(seed: string): number {
   h = Math.imul(h ^ (h >>> 15), 2246822507);
   h = Math.imul(h ^ (h >>> 13), 3266489909);
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+}
+
+// Who gets a seat: the people whose times overlap most, and among equals a draw that's fixed for this room, never
+// the order people joined in. First come is how agent markets go wrong: agents take the first offer 60-100% of the
+// time, which rewards speed over fit (Magentic Marketplace, 2025).
+export function bySeatFit<T>(candidates: T[], timesOfCandidate: (c: T) => string[], wanted: string[], seed: string): T[] {
+  const overlap = (c: T) => (wanted.length ? timesOfCandidate(c).filter((t) => wanted.includes(t)).length : 0);
+  return candidates
+    .map((c, i) => ({ c, score: overlap(c), draw: unitRandom(`${seed}:${i}`) }))
+    .sort((a, b) => b.score - a.score || a.draw - b.draw)
+    .map((x) => x.c);
 }
 
 export function planThreads(intents: ProfileIntent[], population: Population): ThreadPlan[] {
@@ -94,14 +125,16 @@ export function planThreads(intents: ProfileIntent[], population: Population): T
           );
           if (others.length >= group.size - 1) {
             thread.kind = "group";
-            thread.room = others.slice(0, group.size - 1).map((o) => ({ name: memberOf(o).name }));
+            const seats = bySeatFit(others, (o) => timesOf(o.conditions), yourTimes.length ? yourTimes : theirTimes, thread.id);
+            thread.room = seats.slice(0, group.size - 1).map((o) => ({ name: memberOf(o).name }));
             floor = group.perPerson;
           }
         }
         thread.theirLimit = floor;
-        result = settle(intent.price, floor, thread.id + intent.price, "buyer");
+        // A group sets its own per-person price, so the going rate for one-to-one doesn't apply.
+        result = settle(intent.price, floor, thread.kind === "group" ? null : goingRate(population, intent.tag, intent.unit), thread.id, "buyer");
       } else {
-        result = settle(c.price, intent.price, thread.id + intent.price, "seller");
+        result = settle(c.price, intent.price, goingRate(population, intent.tag, intent.unit), thread.id, "seller");
       }
 
       thread.moves = result.moves;

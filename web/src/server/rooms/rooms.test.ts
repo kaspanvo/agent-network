@@ -39,7 +39,7 @@ async function runWith(intents: ProfileIntent[]) {
 describe("circles", () => {
   it("opens a group room when several members share an interest, and plans something that fits your times", () => {
     const [circle] = planCircles([music], LISBON_PILOT);
-    expect(circle!.members.map((m) => m.name)).toEqual(["Lena", "Rita", "Bruno", "Carla"]);
+    expect(circle!.members.map((m) => m.name).sort()).toEqual(["Bruno", "Carla", "Lena", "Rita"]);
     expect(circle!.chosen?.id).toBe("jazz-jam");
     const plan = planOpportunity(circle!, "Ana")!;
     expect(plan).toMatchObject({ kind: "plan", price: null, title: "Jazz jam session", version: 1 });
@@ -120,12 +120,13 @@ describe("demo intake with interests", () => {
     session.recapConfirmed = true;
     // Then it checks its guesses on an either/or pick between real things happening: jazz, as she said.
     const fifth = await say("[App note: Ana confirmed the recap.] That's right.");
-    expect(fifth.find((e) => e.type === "widget")).toMatchObject({ widget: { kind: "pairs", pairs: [{ a: { title: "Jazz jam session" }, b: { title: "Fado night with Rita's group" } }] } });
-    expect(session.calibration!.pairs[0]!.predicted).toBe("a");
-    scoreCalibration(session, { [session.calibration!.pairs[0]!.id]: "a" });
+    expect(fifth.find((e) => e.type === "widget")).toMatchObject({ widget: { kind: "pairs" } });
+    const jazzOrFado = session.calibration!.pairs.find((p) => p.a.title === "Jazz jam session" && p.b.title === "Fado night with Rita's group")!;
+    expect(jazzOrFado.predicted).toBe("a");
+    scoreCalibration(session, Object.fromEntries(session.calibration!.pairs.map((p) => [p.id, p.predicted])));
     session.chat.at(-1)!.answered = true;
     const sixth = await say("[App note: Ana answered the either/or picks. Their agent guessed 1 of 1 right.]");
     expect(sixth.some((e) => e.type === "ready")).toBe(true);
-    expect(session.calibration!.agreed).toBe(1);
+    expect(session.calibration!.agreed).toBe(session.calibration!.pairs.length);
   });
 });

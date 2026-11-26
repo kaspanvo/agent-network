@@ -101,3 +101,56 @@ describe("what other agents hear about an intent", () => {
     expect(saveIntent(createSession("Ana"), { direction: "seek", summary: "Spanish lessons up to 15€/hour", tag: "spanish-lessons", provenance: "stated", evidence: "", unit: "hour", price: 15 }).summary).toBe("Spanish lessons");
   });
 });
+
+describe("before going out, the agent checks it has read the person right", () => {
+  async function confirmed(): Promise<{ session: Session; host: Host }> {
+    const session = createSession("Ana");
+    saveIntent(session, { kind: "deal", direction: "seek", summary: "Learn Spanish", tag: "spanish-lessons", provenance: "stated", evidence: "", unit: "hour", price: 15, conditions: ["evenings"] });
+    session.recapConfirmed = true;
+    session.ready = true;
+    session.chat.push({ id: "plan", role: "agent", text: "Here's my plan." });
+    return { session, host: { actor: makeActor(session, () => {}), start: () => makeActor(session, () => {}) } };
+  }
+
+  it("asks for the either/or picks first if they were never shown, and the app can show them itself", async () => {
+    const { session, host } = await confirmed();
+    const refused = await call(host, "POST", "/api/agent/run");
+    expect(refused.status).toBe(409);
+    expect(await refused.json()).toMatchObject({ needs: "calibration" });
+    const shown = await (await call(host, "POST", "/api/intake", { kind: "refresh", what: "calibration" })).text();
+    expect(shown).toContain('"kind":"pairs"');
+    expect(session.calibration?.pairs.length).toBeGreaterThan(0);
+  });
+
+  it("says so when it got too many picks wrong, and goes anyway only if the person says so", async () => {
+    const { session, host } = await confirmed();
+    const { calibrationPairs, scoreCalibration } = await import("./intake/calibration");
+    const pairs = calibrationPairs(session);
+    session.calibration = { pairs };
+    scoreCalibration(session, Object.fromEntries(pairs.map((p) => [p.id, p.predicted === "a" ? "b" : "a"])));
+    const refused = await call(host, "POST", "/api/agent/run");
+    expect(await refused.json()).toMatchObject({ needs: "understanding", agreed: 0, total: pairs.length });
+    const went = await call(host, "POST", "/api/agent/run", { anyway: true });
+    expect(went.status).toBe(200);
+    expect(await went.text()).toContain('"type":"discover"');
+  });
+});
+
+describe("changing a limit in a room", () => {
+  it("allows two changes, then keeps the limit as it is", async () => {
+    const { session, host } = readyWithInferred();
+    session.intents = session.intents.filter((i) => i.tag === "spanish-lessons");
+    session.calibration = { pairs: [], picks: {}, agreed: 0 };
+    await (await call(host, "POST", "/api/agent/run", { anyway: true })).text();
+    const room = session.run!.events.find((e) => e.type === "discover")!;
+    const threadId = (room as { threadId: string }).threadId;
+    // Each change streams to the end before the next.
+    for (const limit of [16, 17]) {
+      const response = await call(host, "POST", `/api/rooms/${threadId}/renegotiate`, { limit });
+      expect(response.status).toBe(200);
+      await response.text();
+    }
+    const third = await call(host, "POST", `/api/rooms/${threadId}/renegotiate`, { limit: 18 });
+    expect(third.status).toBe(409);
+  });
+});
