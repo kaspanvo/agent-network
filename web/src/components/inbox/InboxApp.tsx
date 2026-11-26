@@ -166,9 +166,19 @@ export function InboxApp() {
   };
 
   // Sending the agent out. If the recap needs another look first, the agent shows it, instead of a refusal.
+  // When the person asked to go out but had to check the recap first, the agent goes as soon as they confirm it.
+  const wantsOut = useRef(false);
   const sendOut = async () => {
+    wantsOut.current = false;
     const needs = await runs.start();
-    if (needs === "recap") await intake.refresh();
+    if (needs === "recap") {
+      wantsOut.current = true;
+      await intake.refresh();
+    }
+  };
+  const sendToAgent = async (input: unknown, echo?: string, answeredId?: string) => {
+    const becameReady = await intake.send(input, echo, answeredId);
+    if (becameReady && wantsOut.current) await sendOut();
   };
 
   const begin = async (event: React.FormEvent) => {
@@ -403,7 +413,7 @@ export function InboxApp() {
               run={run}
               running={out}
               decisions={decisions}
-              onSend={intake.send}
+              onSend={sendToAgent}
               onStop={intake.stop}
               onDecideIntent={intake.decideIntent}
               onSendOut={sendOut}

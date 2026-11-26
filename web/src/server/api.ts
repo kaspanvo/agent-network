@@ -6,7 +6,7 @@ import { checkIn, decide } from "./followup";
 import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
 import { jsonError, ndjson, rateLimited } from "./http";
 import { scoreCalibration } from "./intake/calibration";
-import { isReady, setIntentPrice } from "./intake/profile";
+import { isReady, recapWidget, setIntentPrice } from "./intake/profile";
 import { OPENING_CHOICES, openingMessage } from "./intake/prompt";
 import { aboutEvent } from "./intake/tools";
 import { RECAP_CHANGE, RECAP_CONFIRMED, type IntakeEvent } from "./intake/types";
@@ -185,9 +185,19 @@ async function intake(request: Request, host: Host) {
     if (session.chat.length > 0) return jsonError("This conversation has already started.", 409);
     userText = openingMessage(session.name);
   } else if (input.kind === "refresh") {
-    // The app asks for the recap again, after the person changed what their agent will look for. Nothing shows as theirs.
+    // The app shows the recap again itself, after the person changed what their agent will look for or tried to send it
+    // out unchecked. No model is asked, so it can't be skipped; the agent hears about it with the next message.
     if (session.recapConfirmed) return jsonError("The recap is already confirmed.", 409);
-    userText = `[App note: ${session.name} changed what their agent will look for. Show the recap again so they can check it.]`;
+    if (!isReady(session)) return jsonError("Tell your agent what you'd be open to first: an interest, or a deal with a price.", 409);
+    const item = { id: randomUUID(), role: "agent" as const, text: "Here's what I'll look for, and exactly what other agents will hear. Did I get it right?", widget: recapWidget(session) };
+    session.chat.push(item);
+    session.pendingNotes.push(`[App note: the app showed ${session.name} the recap again. Their answer comes next.]`);
+    persist(actor);
+    return ndjson<IntakeEvent>(actor, async (emit) => {
+      emit({ type: "agent_start", itemId: item.id });
+      emit({ type: "text", itemId: item.id, delta: item.text });
+      emit({ type: "widget", itemId: item.id, widget: item.widget });
+    });
   } else if (input.kind === "text") {
     // Typing instead of using a quick-pick answers it.
     for (const item of session.chat) if (item.widget && !item.answered) item.answered = true;
@@ -251,6 +261,12 @@ async function intake(request: Request, host: Host) {
   return ndjson<IntakeEvent>(actor, async (emit, signal) => {
     for (const event of early) emit(event);
     await agent.respond(session, userText, emit, signal);
+    // Ready is the app's call, not the model's: once the person has confirmed the recap and there's something to go out
+    // with, the agent can go. A model that forgets to call mark_ready can't leave "Send my agent out" dead.
+    if (!session.ready && session.recapConfirmed && isReady(session)) {
+      session.ready = true;
+      emit({ type: "ready" });
+    }
   });
 }
 

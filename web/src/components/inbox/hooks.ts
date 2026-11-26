@@ -52,7 +52,9 @@ export function useIntake() {
   };
 
   // `echo` is what the person sees as their own message; `answeredId` closes the widget they used.
-  const send = async (input: unknown, echo?: string, answeredId?: string) => {
+  // Resolves true when this turn made the agent ready to go out.
+  const send = async (input: unknown, echo?: string, answeredId?: string): Promise<boolean> => {
+    let becameReady = false;
     const controller = new AbortController();
     abort.current = controller;
     setBusy(true);
@@ -62,7 +64,10 @@ export function useIntake() {
       ...(echo ? [{ id: `local-${Date.now()}`, role: "user" as const, text: echo }] : []),
     ]);
     try {
-      for await (const event of await api.intake(input, controller.signal)) apply(event);
+      for await (const event of await api.intake(input, controller.signal)) {
+        if (event.type === "ready") becameReady = true;
+        apply(event);
+      }
     } catch (err) {
       if (controller.signal.aborted) setChat((c) => c.map((m, i) => (i === c.length - 1 && m.role === "agent" ? { ...m, stopped: true } : m)));
       else setError((err as Error).message);
@@ -70,6 +75,7 @@ export function useIntake() {
       abort.current = null;
       setBusy(false);
     }
+    return becameReady;
   };
 
   const stop = () => abort.current?.abort();

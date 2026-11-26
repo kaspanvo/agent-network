@@ -2,7 +2,7 @@ import { createHash, randomUUID as uuid } from "node:crypto";
 import type Anthropic from "@anthropic-ai/sdk";
 import { allChecks } from "./audit";
 import { allDisclosures } from "./disclosure";
-import { isStale } from "./intake/profile";
+import { isReady, isStale } from "./intake/profile";
 import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
 import type { OpenMessage } from "./intake/openmodel";
 import type { Calibration } from "./intake/calibration";
@@ -104,8 +104,8 @@ export function upgradeSession(session: Session): Session {
   session.log ??= [];
   session.followups ??= {};
   session.recapConfirmed ??= session.ready;
-  // Sessions saved while confirming an inferred intent could leave the agent ready with the recap unchecked.
-  if (!session.recapConfirmed) session.ready = false;
+  // Ready means the recap is checked and there's something to go out with, whatever the model did or didn't call.
+  session.ready = session.recapConfirmed && isReady(session);
   return session;
 }
 

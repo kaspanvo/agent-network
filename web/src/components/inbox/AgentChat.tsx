@@ -161,7 +161,8 @@ export function AgentChat(props: {
   const replies = sentOut || ready ? suggestions.filter((s) => s !== "Send my agent out") : suggestions;
 
   const sendText = (text: string) => {
-    if (text === "Send my agent out" && ready) return props.onSendOut();
+    // Asking to go out always tries to go out; the server says if anything is missing, and the app fixes what it can.
+    if (/^send (my|the) agent out\.?$/i.test(text.trim())) return props.onSendOut();
     props.onSend({ kind: "text", text }, text);
   };
 

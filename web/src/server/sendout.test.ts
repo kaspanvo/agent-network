@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeActor } from "./actor";
 import { handleApi, type Host } from "./api";
+import { agentModels } from "./models";
 import { saveIntent, withoutAmounts } from "./intake/profile";
 import { createSession, upgradeSession, type Session } from "./store";
 
@@ -49,6 +50,43 @@ describe("sending the agent out after the person changed something", () => {
     session.ready = true;
     session.recapConfirmed = false;
     expect(upgradeSession(session).ready).toBe(false);
+  });
+});
+
+describe("ready is the app's call, not the model's", () => {
+  // A model that answers but never calls mark_ready, like a small open model that skips a step.
+  const forgetful = (session: Session): Host => ({
+    actor: makeActor(session, () => {}),
+    start: () => makeActor(session, () => {}),
+    agents: { ...agentModels(), intake: () => ({ respond: async () => {} }) },
+  });
+
+  it("is ready once the person confirms the recap, even if the model never says so", async () => {
+    const { session } = readyWithInferred();
+    session.ready = false;
+    session.recapConfirmed = false;
+    session.chat.push({ id: "recap", role: "agent", text: "Did I get it right?", widget: { kind: "recap", items: [] } });
+    const text = await (await call(forgetful(session), "POST", "/api/intake", { kind: "recap", itemId: "recap", answer: "confirm" })).text();
+    expect(session.ready).toBe(true);
+    expect(text).toContain('"type":"ready"');
+  });
+
+  it("shows the recap itself when asked, without the model", async () => {
+    const { session } = readyWithInferred();
+    session.recapConfirmed = false;
+    const host: Host = { ...forgetful(session), agents: { ...agentModels(), intake: () => ({ respond: async () => { throw new Error("the model was asked"); } }) } };
+    const text = await (await call(host, "POST", "/api/intake", { kind: "refresh" })).text();
+    expect(text).toContain('"kind":"recap"');
+    expect(text).not.toContain("the model was asked");
+    expect(session.chat.at(-1)?.widget?.kind).toBe("recap");
+  });
+
+  it("unsticks sessions saved with the recap confirmed but never marked ready", () => {
+    const session = createSession("Ana");
+    saveIntent(session, { kind: "deal", direction: "seek", summary: "Learn Spanish", tag: "spanish-lessons", provenance: "stated", evidence: "", unit: "hour", price: 15 });
+    session.recapConfirmed = true;
+    session.ready = false;
+    expect(upgradeSession(session).ready).toBe(true);
   });
 });
 
