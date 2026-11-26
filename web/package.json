@@ -13,7 +13,8 @@
     "lint": "eslint",
     "typecheck": "next typegen && tsc --noEmit && tsc --noEmit -p worker",
     "test": "vitest run",
-    "check": "npm run typecheck && npm run lint && npm test"
+    "check": "npm run typecheck && npm run lint && npm test",
+    "sim": "vite-node src/sim/cli.ts --"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",

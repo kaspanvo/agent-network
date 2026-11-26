@@ -138,6 +138,19 @@ Settings and dashboard steps:
 
 The same API code runs in both places: `src/server/api.ts` takes a standard `Request` and a host. Locally the host is a registry in the Next.js process (`src/server/local/`); on Cloudflare it's the person's Durable Object (`worker/person.ts`).
 
+## Simulated members
+
+`npm run sim` puts twelve invented people through Open end to end, through the same API the browser uses: setup chat, confirming what the agent inferred, the recap, the either/or picks, going out, answering proposals, check-ins, forgetting something. It takes under a second and costs nothing (scripted agents). With `npm run dev` running, open `http://localhost:3000/api/dev/sim` for the report, then **Open <name>'s agent in the app** to step into any of them and see exactly what they saw. Both dev routes exist only in local development, and only sessions the harness marked synthetic can be opened.
+
+How it follows what's known to work (`src/sim/`):
+
+- **Decisions in code, never by a model.** Each person has a hidden card (`personas.ts`): true limits, what they tell their agent, when they're free, and how they behave (noise, walking away from a fit, not answering, not turning up). Model-played users are too agreeable; a hidden value plus seeded noise isn't. A model could write their words in a later tier without changing a decision.
+- **Awkward people on purpose:** someone whose limit is below anything on offer, someone who mentions something sensitive, a prompt injector, someone probing the other side's limit, someone lying in check-ins, someone flooding a room, someone who changes their mind.
+- **An independent judge** (`oracle.ts`) knows everyone's true limits and checks, in its own code rather than Open's: no limit leaked either way, every price inside both limits, nothing agreed without a yes, private details and sensitive things kept, forgetting complete, logs intact, messages signed and marked AI, and the rules holding against each attack. It also measures the funnel, approval rate, each side's share of a deal, and deals lost to the pricing rule.
+- **Repeatable and in CI.** `npm run sim -- --seed 7` reruns with other choices; `--runs 20` shows how much the numbers move. `src/sim/sim.test.ts` runs five seeds with every check on each `npm test`.
+
+What it can't tell you yet: simulated people meet the Lisbon pilot's members, not each other, because the matcher doesn't match real members together yet. Absolute rates (how many say yes) mean little until the personas are grounded in 40–60 real setup interviews, with 30% held back to check the simulation against. Open's random ids also nudge prices, so two runs with the same seed can differ slightly. `--live-model` runs the person's agent on whatever model the environment provides, and costs money.
+
 ## How it works
 
 | Piece | Where | What it does |

@@ -80,6 +80,9 @@ export type Session = {
   lastSeenAt?: string;
   // When the person said they're 18 or over, before the agent was made.
   adultAt?: string;
+  // A simulated member made by the simulation harness (src/sim). Set by the server-side harness only, never from a
+  // request, so simulated people can be told apart from real ones and kept out of real numbers.
+  synthetic?: boolean;
 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;

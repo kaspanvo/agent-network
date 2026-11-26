@@ -127,6 +127,8 @@ function firstUnpriced(session: Session, direction: "seek" | "offer"): ProfileIn
 function priceWidget(intent: ProfileIntent): Widget {
   if (intent.direction === "seek")
     return { kind: "number", label: `Most you'd pay${intent.unit === "hour" ? " per hour" : ""}`, min: 5, max: intent.unit === "hour" ? 40 : 800, step: intent.unit === "hour" ? 1 : 10, value: intent.unit === "hour" ? 15 : 300, unit: intent.unit === "hour" ? "€/hour" : "€", intentId: intent.id };
+  // Teaching or a service by the hour gets an hourly slider; a one-off sale gets a bigger range.
+  if (intent.unit === "hour") return { kind: "number", label: "Least you'd accept per hour", min: 5, max: 60, step: 1, value: 20, unit: "€/hour", intentId: intent.id };
   return { kind: "number", label: "Least you'd accept", min: 20, max: 1000, step: 10, value: 220, unit: "€ one-off", intentId: intent.id };
 }
 
@@ -296,8 +298,13 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
             }),
           );
         }
-        if (saved.length === 0)
-          saved.push(saveIntent(session, { kind: "deal", direction: "seek", summary: userText.trim().slice(0, 80), tag: "other", provenance: "stated", evidence: userText.trim(), unit: "one-off", price: null }));
+        // Nothing it knows: ask, rather than save their exact words as something to look for. Those words would become
+        // what other agents hear, private details and all (the simulation caught "Looking for: my door code is 4821").
+        if (saved.length === 0) {
+          await say("I'm not sure I can find that on the network yet. In a few words, what would you like to learn, buy, sell or do with others?");
+          suggest(["I'd love to learn Spanish", "My old bike just sits there", "I'm into jazz and live music"]);
+          return;
+        }
         for (const intent of saved) {
           emit({ type: "intent", intent });
           note(activityFor(intent, true));
