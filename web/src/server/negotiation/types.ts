@@ -51,6 +51,15 @@ export type Opportunity = {
   basis?: string;
   // What the version before said, so the person sees what changed.
   previous?: { version: number; price: number | null; terms: string[] };
+  // A proposal holds everyone's place until this time, like a lease on a claimed task. Unanswered by then, it lapses
+  // and the others are free again, so nobody is kept waiting on someone who went quiet.
+  holdUntil?: string;
+  // The person asked once for more time. A hold can be extended only once.
+  extended?: boolean;
+  // Who has said yes. Introductions wait until everyone has: one person's agent can't commit the others.
+  approvals?: Record<string, "yes" | "waiting">;
+  // A fingerprint of exactly what the person approved, so a later change to the terms can't ride on their yes.
+  approvedTerms?: string;
 };
 
 // Deal rooms negotiate a price. Circles are rooms around a shared interest. Private rooms are one-to-one with one member's agent.
@@ -66,6 +75,8 @@ export type ShortlistOption = { threadId: string; who: string; price: number; un
 // How a check-in after a yes went.
 export type CheckIn = "again" | "once" | "missed";
 export type Decision = "approved" | "declined";
+// Where a proposal ended up: the person's answer, or "lapsed" when its hold ran out before they answered.
+export type Outcome = Decision | "lapsed";
 
 export type AgentEvent =
   | { type: "status"; text: string }
@@ -79,7 +90,9 @@ export type AgentEvent =
   | { type: "opportunity"; opportunity: Opportunity }
   // Your agent heard every offer for one intent before choosing, in random order, and shows what it compared.
   | { type: "shortlist"; intentId: string; about: string; heard: number; options: ShortlistOption[]; chosen: string; why: string }
-  | { type: "decision"; threadId: string; opportunityId: string; decision: Decision }
+  | { type: "decision"; threadId: string; opportunityId: string; decision: Outcome }
+  // A proposal's hold was extended at the person's request, or ran out before they answered.
+  | { type: "hold"; threadId: string; opportunityId: string; stage: "extended" | "lapsed"; until: string; text: string }
   // After a yes: everyone else says yes and you're introduced, then your agent checks whether it happened.
   | { type: "followup"; threadId: string; opportunityId: string; stage: "introduced" | "check_in" | "done"; text: string; answer?: CheckIn }
   | { type: "error"; message: string }

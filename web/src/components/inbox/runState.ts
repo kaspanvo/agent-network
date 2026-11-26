@@ -9,7 +9,8 @@ export type TimelineItem =
   | { kind: "note"; text: string }
   | { kind: "room"; members: string[]; why: string }
   | { kind: "outcome"; result: "agreed" | "no_fit" | "open"; why: string }
-  | { kind: "followup"; stage: "introduced" | "check_in" | "done"; text: string; opportunityId: string; answer?: CheckIn };
+  | { kind: "followup"; stage: "introduced" | "check_in" | "done"; text: string; opportunityId: string; answer?: CheckIn }
+  | { kind: "hold"; stage: "extended" | "lapsed"; text: string };
 
 export type ThreadStatus = "talking" | "agreed" | "no_fit" | "open";
 
@@ -84,6 +85,13 @@ export function reduce(state: RunState, event: AgentEvent | { type: "done" }): R
           t.id === event.threadId ? { ...t, timeline: [...t.timeline, { kind: "followup", stage: event.stage, text: event.text, opportunityId: event.opportunityId, answer: event.answer }] } : t,
         ),
       };
+    case "hold":
+      return {
+        ...state,
+        // The new hold time travels with the proposal, so the room shows how long it's held.
+        opportunities: state.opportunities.map((o) => (o.id === event.opportunityId && event.stage === "extended" ? { ...o, holdUntil: event.until, extended: true } : o)),
+        threads: state.threads.map((t) => (t.id === event.threadId ? { ...t, timeline: [...t.timeline, { kind: "hold", stage: event.stage, text: event.text }] } : t)),
+      };
     case "error":
       return { ...state, error: event.message };
     case "done":
@@ -115,6 +123,7 @@ export function lastLine(thread: Thread): string {
     if (item.kind === "note") return item.text;
     if (item.kind === "room") return `Room opened with ${item.members.length} people`;
     if (item.kind === "followup") return item.stage === "check_in" ? "Did it happen? Your agent will ask" : item.text;
+    if (item.kind === "hold") return item.stage === "lapsed" ? "Lapsed unanswered. The others are free again" : "Held a day longer for you";
   }
   return thread.why;
 }
@@ -133,6 +142,7 @@ export function statusOf(thread: Thread, opportunities?: Opportunity[], decision
   if (offer && decisions && !decisions[offer.id]) return { text: "WAITING ON YOU", cls: "bg-signal text-white" };
   if (offer && decisions?.[offer.id] === "approved") return { text: followupOf(thread, offer.id).done ? "DONE" : "YOU SAID YES", cls: "bg-live-soft text-live-ink" };
   if (offer && decisions?.[offer.id] === "declined") return { text: "YOU SAID NO", cls: "bg-[#f1f2f4] text-slate" };
+  if (offer && decisions?.[offer.id] === "lapsed") return { text: "LAPSED", cls: "bg-[#f1f2f4] text-slate" };
   switch (thread.status) {
     case "talking":
       return { text: deal ? "NEGOTIATING" : "TALKING", cls: "bg-signal-soft text-signal-ink" };

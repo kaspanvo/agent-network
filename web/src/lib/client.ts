@@ -76,6 +76,8 @@ export const api = {
   setIntent: (id: string, status: "confirmed" | "rejected") =>
     post(`/api/intents/${id}`, { status }, "PATCH").then(json<{ intents: PublicSession["intents"]; ready: boolean }>),
   run: () => fetch("/api/agent/run", { method: "POST" }).then((r) => lines<AgentEvent>(r)),
-  decide: (id: string, decision: "approved" | "declined") => post(`/api/opportunities/${id}`, { decision }).then((r) => lines<AgentEvent>(r)),
+  // `version` is the version on screen: if the proposal changed since, the server refuses rather than apply the answer to new terms.
+  decide: (id: string, decision: "approved" | "declined", version?: number) => post(`/api/opportunities/${id}`, { decision, version }).then((r) => lines<AgentEvent>(r)),
+  hold: (id: string) => post(`/api/opportunities/${id}/hold`, {}).then((r) => lines<AgentEvent>(r)),
   checkIn: (id: string, answer: CheckIn) => post(`/api/opportunities/${id}/checkin`, { answer }).then((r) => lines<AgentEvent>(r)),
 };

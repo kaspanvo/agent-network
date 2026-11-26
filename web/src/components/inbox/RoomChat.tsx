@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { formatPrice, lowerFirst, type Unit } from "@/server/domain";
-import type { Card, CheckIn, Opportunity } from "@/server/negotiation/types";
+import type { Card, CheckIn, Opportunity, Outcome } from "@/server/negotiation/types";
 import { AgentAvatar, Avatar, AvatarStack } from "./Avatar";
 import { ConversationHeader, Dots, JumpToLatest, useStickToBottom } from "./ChatFrame";
 import { Composer } from "./Composer";
@@ -71,6 +71,24 @@ function SystemLine({ children }: { children: React.ReactNode }) {
   return <p className="mx-auto max-w-[90%] animate-rise rounded-full bg-[#eef0f4] px-3.5 py-1.5 text-center text-[13px] text-slate">{children}</p>;
 }
 
+// How long the others hold their place for you, in your own time zone, and the one-time ask for more.
+function HeldUntil({ opportunity, busy, onExtend }: { opportunity: Opportunity; busy: boolean; onExtend: () => void }) {
+  const until = new Date(opportunity.holdUntil!);
+  const when = `${until.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}, ${until.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-slate">
+      <span>
+        Held for you until <time dateTime={opportunity.holdUntil}>{when}</time>. Unanswered by then, it lapses and the others are free again.
+      </span>
+      {!opportunity.extended && (
+        <button type="button" onClick={onExtend} disabled={busy} className="min-h-9 font-medium text-ink underline underline-offset-2 disabled:opacity-40">
+          Ask for more time
+        </button>
+      )}
+    </p>
+  );
+}
+
 function FollowUp({ item, due, busy, onCheckIn }: { item: Extract<TimelineItem, { kind: "followup" }>; due: boolean; busy: boolean; onCheckIn: (answer: CheckIn) => void }) {
   if (item.stage === "done") return <SystemLine>{item.text}</SystemLine>;
   if (item.stage === "introduced")
@@ -104,7 +122,7 @@ function FollowUp({ item, due, busy, onCheckIn }: { item: Extract<TimelineItem, 
 }
 
 function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineItem, { kind: "followup" }>; previous: TimelineItem | undefined; showWhy: boolean; you: string; deal: boolean }) {
-  if (item.kind === "note") return <SystemLine>{item.text}</SystemLine>;
+  if (item.kind === "note" || item.kind === "hold") return <SystemLine>{item.text}</SystemLine>;
   if (item.kind === "room")
     return (
       <div className="mx-auto flex w-full max-w-md animate-rise flex-col items-center gap-2 rounded-2xl border-[1.5px] border-dashed border-signal-light bg-[#fff7f3] p-4 text-center">
@@ -219,7 +237,7 @@ export function RoomChat(props: {
   thread: Thread;
   you: string;
   opportunity: Opportunity | undefined;
-  decision: "approved" | "declined" | undefined;
+  decision: Outcome | undefined;
   limit: { value: number; unit: Unit; direction: "seek" | "offer" } | null;
   live: boolean;
   busy: boolean;
@@ -233,6 +251,8 @@ export function RoomChat(props: {
   // Agreed under an intent the person has since changed: it can be declined, not approved.
   stale: boolean;
   onCheckIn: (id: string, answer: CheckIn) => void;
+  // Asks the others to hold the proposal a day longer (once).
+  onExtend: (id: string) => void;
   onRenegotiate: (limit: number) => void;
   onSay: (text: string) => void;
   onBack: () => void;
@@ -363,6 +383,10 @@ export function RoomChat(props: {
                       Dismiss
                     </button>
                   </div>
+                ) : decision === "lapsed" ? (
+                  <p className="text-sm text-slate">
+                    You didn&apos;t answer in time, so this lapsed and the others are free again. Nobody was told why. Send your agent out again for a fresh one.
+                  </p>
                 ) : decision ? (
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className={`text-sm ${decision === "approved" ? "text-live-ink" : "text-slate"}`}>
@@ -385,6 +409,8 @@ export function RoomChat(props: {
                     )}
                   </div>
                 ) : (
+                  <>
+                  {opportunity.holdUntil && <HeldUntil opportunity={opportunity} busy={busy} onExtend={() => props.onExtend(opportunity.id)} />}
                   <div className="flex flex-wrap gap-2">
                     <button type="button" onClick={() => props.onDecide(opportunity.id, "approved")} className={`min-h-12 flex-1 whitespace-nowrap rounded-full bg-ink px-5 font-semibold text-white ${limit ? "max-sm:basis-full" : ""}`}>
                       {price ? `Approve version ${opportunity.version}` : "I'm in"}
@@ -398,6 +424,7 @@ export function RoomChat(props: {
                       {price ? "Decline" : "Not this time"}
                     </button>
                   </div>
+                  </>
                 )}
               </>
             ) : deal && thread.status === "agreed" ? (

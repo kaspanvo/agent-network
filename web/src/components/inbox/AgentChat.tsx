@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { ProfileIntent } from "@/server/domain";
 import type { ChatItem } from "@/server/intake/types";
-import type { Opportunity } from "@/server/negotiation/types";
+import type { Opportunity, Outcome } from "@/server/negotiation/types";
 import { formatPrice, isInterest, lowerFirst } from "@/server/domain";
 import { RECAP_CHANGE, RECAP_CONFIRMED } from "@/server/intake/types";
 import { ChoicesWidget, NumberWidget, PairsWidget, RecapWidget } from "../start/Widgets";
@@ -137,7 +137,7 @@ export function AgentChat(props: {
   error: string | null;
   run: RunState;
   running: boolean;
-  decisions: Record<string, "approved" | "declined">;
+  decisions: Record<string, Outcome>;
   onSend: (input: unknown, echo?: string, answeredId?: string) => void;
   onStop: () => void;
   onDecideIntent: (id: string, status: "confirmed" | "rejected") => void;

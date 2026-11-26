@@ -4,7 +4,8 @@ import { formatPrice, isInterest, lowerFirst, sharedLine, type ProfileIntent, ty
 import type { Check } from "@/server/audit";
 import type { Opportunity } from "@/server/negotiation/types";
 import type { AgentMode } from "@/server/pace";
-import type { LogEntry } from "@/server/store";
+import type { Disclosure } from "@/server/disclosure";
+import type { LogActor, LogEntry } from "@/server/store";
 import { useState } from "react";
 import { NetworkGraph } from "../agent/NetworkGraph";
 import { AgentPanel } from "../start/AgentPanel";
@@ -21,7 +22,43 @@ const DOT: Record<LogEntry["kind"], string> = {
   followup: "bg-live",
   withheld: "bg-[#b45309]",
   read: "bg-mist",
+  hold: "bg-mist",
 };
+
+const BY: { value: LogActor | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "agent", label: "Your agent" },
+  { value: "you", label: "You" },
+  { value: "open", label: "Open" },
+];
+
+const SEEN: Record<Disclosure["status"], { label: (to: string) => string; cls: string }> = {
+  shared: { label: (to) => `Shared with ${to}`, cls: "bg-signal-soft text-signal-ink" },
+  private: { label: (to) => to, cls: "bg-live-soft text-live-ink" },
+  on_yes: { label: () => "Only after everyone says yes", cls: "bg-[#eef0f4] text-ink" },
+};
+
+// What this room knows about the person, and the rule behind each item. Worked out in code from the room's record.
+function WhoSeesWhat({ items }: { items: Disclosure[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section aria-label="Who sees what in this room" className="flex flex-col gap-2">
+      <h3 className="font-mono text-[11px] tracking-wider text-slate">WHO SEES WHAT</h3>
+      <ul className="flex flex-col gap-2">
+        {items.map((d) => (
+          <li key={d.what} className="flex flex-col gap-1 rounded-xl border border-line px-3 py-2">
+            <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+              <span className="text-sm font-medium">{d.what}</span>
+              <span className={`rounded-full px-2 py-0.5 text-[11px] ${SEEN[d.status].cls}`}>{SEEN[d.status].label(d.to)}</span>
+            </span>
+            <span className="text-[13px] text-slate">{d.because}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="text-[12px] text-slate">Worked out in code from this room&apos;s record, not by the AI.</p>
+    </section>
+  );
+}
 
 function time(at: string): string {
   return new Date(at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -30,7 +67,9 @@ function time(at: string): string {
 // Everything the agent did in the person's name, newest first. What it said and to whom is marked in orange.
 function ActivityLog({ log, intact, onOpenRoom }: { log: LogEntry[]; intact: boolean; onOpenRoom: (id: string) => void }) {
   const [all, setAll] = useState(false);
-  const entries = [...log].reverse();
+  const [by, setBy] = useState<LogActor | "all">("all");
+  // Entries from before actors were recorded were all written by the agent or the person; they show under All.
+  const entries = [...log].reverse().filter((e) => by === "all" || e.by === by);
   const shown = all ? entries : entries.slice(0, 12);
   return (
     <section aria-label="Your agent's activity" className="flex flex-col gap-2 border-t border-line pt-4">
@@ -38,13 +77,28 @@ function ActivityLog({ log, intact, onOpenRoom }: { log: LogEntry[]; intact: boo
       <p className="text-[13px] text-slate">
         Everything your agent did in your name. <span className="inline-block size-1.5 rounded-full bg-signal align-middle" aria-hidden="true" /> marks what it said to other agents.
       </p>
-      {entries.length > 0 && (
+      {log.length > 0 && (
+        <div role="group" aria-label="Show entries by who acted" className="flex flex-wrap gap-1.5">
+          {BY.map((b) => (
+            <button
+              key={b.value}
+              type="button"
+              aria-pressed={by === b.value}
+              onClick={() => setBy(b.value)}
+              className={`min-h-8 rounded-full border px-3 text-[12px] ${by === b.value ? "border-ink bg-ink text-white" : "border-line hover:border-ink"}`}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {log.length > 0 && (
         <p className={`text-[12px] ${intact ? "text-live-ink" : "text-signal-ink"}`}>
           {intact ? "✓ Each entry is chained to the one before, so any later edit would show." : "This log was changed after it was written."}
         </p>
       )}
       {entries.length === 0 ? (
-        <p className="text-sm text-slate">Nothing yet.</p>
+        <p className="text-sm text-slate">{log.length === 0 ? "Nothing yet." : "Nothing from them yet."}</p>
       ) : (
         <ol className="flex flex-col">
           {shown.map((entry, i) => {
@@ -196,8 +250,10 @@ export function RoomDetails({
   onMessage,
   shortlist,
   checks,
+  disclosures,
 }: {
   checks: Check[];
+  disclosures: Disclosure[];
   thread: Thread;
   you: string;
   shortlist: Shortlist | undefined;
@@ -294,6 +350,8 @@ export function RoomDetails({
           <p className="text-[12px] text-slate">Checked in code from the room&apos;s record, not by the AI.</p>
         </section>
       )}
+
+      <WhoSeesWhat items={disclosures} />
 
       {shortlist && (
         <section className="flex flex-col gap-1.5">

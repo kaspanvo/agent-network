@@ -99,11 +99,13 @@ The same API code runs in both places: `src/server/api.ts` takes a standard `Req
 | Circles | `src/server/rooms/circle.ts` | Finds members who share an interest at times that suit you, scripts what their agents share, attaches what's happening, and turns the event that fits your times into a plan. |
 | Talking in rooms | `src/server/rooms/reply.ts` | `POST /api/rooms/[id]/messages` adds your message and the other agents' replies. With Claude, it plays each agent, limited to its person's shared facts; without it, a keyword match does the same job. `POST /api/rooms/private` opens a one-to-one room with an agent you've met. |
 | Other members | `src/server/population.ts` | A made-up Lisbon pilot: Diego the Spanish tutor, Lena, Joana, Marco who wants a bike, music people (Lena, Rita, Bruno, Carla), runners (Tom, Sofia), Pedro's game nights, and what each is happy to share. Swap in real members once the intake collects them. |
-| Your agent | `src/server/actor.ts`, `worker/person.ts` | One live agent per person: every request for the same person shares one state (so a decision made while a run streams isn't overwritten) and every event goes through the activity log (`activity.ts`). On Cloudflare it's a Durable Object built on the Agents SDK, which wakes itself for check-ins; locally, `src/server/local/registry.ts` keeps it in memory and saves it to a file. |
+| Your agent | `src/server/actor.ts`, `worker/person.ts` | One live agent per person: every request for the same person shares one state (so a decision made while a run streams isn't overwritten) and every event goes through the activity log (`activity.ts`), where each entry names who acted: the person, their agent, or Open's own code. On Cloudflare it's a Durable Object built on the Agents SDK, which wakes itself (`wake`) when a hold runs out or a check-in is due; every job is safe to run twice. Locally, `src/server/local/registry.ts` keeps it in memory and saves it to a file. |
 | Matcher and privacy | `src/server/negotiation/plan.ts`, `src/server/guard.ts`, `src/server/audit.ts` | `settle()` runs sealed offers; `guard()` checks every outgoing agent message; `checksFor()` runs the per-room checks. |
 | Checking its guesses | `src/server/intake/calibration.ts` | Builds either/or picks from members' shared facts (never prices), predicts the person's choice, scores it and keeps the misses as evidence. |
 | Live runs | `GET /api/agent/events` | Server-sent events for a run in progress. A page reopened while the agent is out replays what it missed and follows live (`Last-Event-ID` supported). |
-| Follow-through | `src/server/followup.ts` | `POST /api/opportunities/[id]` streams the others' yes and the introduction, and schedules the check-in; on Cloudflare a Durable Object alarm wakes the agent then to ask. `POST /api/opportunities/[id]/checkin` records how it went and tells your agent. |
+| Follow-through | `src/server/followup.ts` | `POST /api/opportunities/[id]` takes the version the person saw (an answer to any other version is refused with 409), records each person's yes, introduces people only once everyone has said yes, fingerprints exactly what was approved, and schedules the check-in. When the check-in alarm fires it re-checks that the yes still covers the terms. `POST /api/opportunities/[id]/checkin` records how it went and tells your agent. |
+| Holds | `src/server/holds.ts` | A proposal holds everyone's place for 48 hours, like a lease on a claimed task. Unanswered by then, it lapses: the room is told, the others are free again, and a late yes is refused. `POST /api/opportunities/[id]/hold` asks for one extra day, once. Expiry is checked on every visit and by a Durable Object alarm, so a missed alarm can't keep anyone waiting. |
+| Who sees what | `src/server/disclosure.ts` | For each room, what it knows about the person and the rule behind each item: first name shared, limit with the matcher only, introduction only after everyone says yes, contact details never. Worked out in code from the room's record and shown in Room details. |
 | Sessions | `.data/sessions/` locally, the person's Durable Object on Cloudflare | Keyed by an httpOnly cookie. `.data/` is gitignored: it holds real answers. |
 
 The browser only ever sees its own session: no model history and no other member's limits.
@@ -136,11 +138,21 @@ These choices follow field studies of agent-to-agent marketplaces (Anthropic's P
 - agreed deals went undelivered when nothing tracked them, hence the check-in;
 - people asked to see what their agent did, hence the activity log.
 
+Coordination follows what agent task boards converged on (Vercel Board, coord, swarlo, synapse-channel, agentic-kanban):
+
+- claims carry a lease that runs out if the holder goes quiet, checked lazily on the next request with a timer as backup, hence proposal holds that lapse, swept on each visit and by an alarm;
+- a stale claim's write is refused (Board's `claim_lost`), hence answers fenced to the version the person saw, and a yes fingerprinted so changed terms can't ride on it;
+- a task waits until everything it needs is done, hence introductions that wait for every person's yes;
+- every event records who did it, set by the server, hence an actor on each log entry;
+- access is explained by the rule that decided it (Board's `grants explain`), hence "who sees what" per room;
+- one deliberate difference: boards hand a task to whoever claims it first, which in a market is the first-offer bias Magentic Marketplace measured, so Open keeps sealed rounds for matching.
+
 ## Not built yet
 
 - Real accounts and email. A session is a cookie; losing it loses the agent.
 - Check-ins are asked in the app when the alarm fires, but nothing tells the person to come back yet: that needs email or Web Push from the Durable Object.
-- The other members are simulated. Real people don't enter the market yet, because their side of a deal would need their own approval (a room-level approval workflow that waits for each member).
+- The other members are simulated and say yes at once. Approvals are recorded per person and introductions already wait for all of them, but real members answering on their own time needs the room's approvals kept in the market object, where each member's agent can write its own.
+- Idempotency keys on answers and holds: today a repeated request is refused (409) rather than replayed.
 - An interactive browser (clicking, filtering) for the agent. Only reading is built; anything that acts on a page would need the person's approval first.
 - AI Gateway isn't created yet: Wrangler can't create one, so it's a dashboard step (above).
 - Shareable seat links, the organizer view, and the Mixer report from the designs.

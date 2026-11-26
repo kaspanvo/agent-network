@@ -3,6 +3,7 @@ import { z } from "zod";
 import { listen, observe, persist, record, type Actor } from "./actor";
 import { formatPrice } from "./domain";
 import { checkIn, decide } from "./followup";
+import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
 import { jsonError, ndjson, rateLimited } from "./http";
 import { scoreCalibration } from "./intake/calibration";
 import { isReady, setIntentPrice } from "./intake/profile";
@@ -25,8 +26,9 @@ export type Host = {
   start: (name: string) => Actor;
   market?: Market;
   agents?: Agents;
-  // Called after something the person must answer later was agreed, so the host can wake the agent then.
-  scheduleCheckIn?: (opportunityId: string, at: Date) => void;
+  // Wakes the person's agent later: when a proposal's hold runs out, or when it's time to ask how something went.
+  // A Durable Object alarm on Cloudflare. Locally there's none; holds are also swept on every visit.
+  wake?: Scheduler;
 };
 
 export function cookieOf(request: Request, name: string): string | undefined {
@@ -67,14 +69,25 @@ const routes: Route[] = [
   { method: "GET", pattern: /^\/api\/agent\/events$/, handle: events },
   { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)$/, handle: decision },
   { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)\/checkin$/, handle: checkin },
+  { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)\/hold$/, handle: hold },
   { method: "POST", pattern: /^\/api\/rooms\/private$/, handle: privateRoom },
   { method: "POST", pattern: /^\/api\/rooms\/([^/]+)\/messages$/, handle: message },
   { method: "POST", pattern: /^\/api\/rooms\/([^/]+)\/renegotiate$/, handle: renegotiateRoom },
 ];
 
-export async function handleApi(request: Request, host: Host): Promise<Response> {
-  const refused = crossSite(request);
+const MAX_BODY = 64 * 1024;
+
+export async function handleApi(incoming: Request, host: Host): Promise<Response> {
+  const refused = crossSite(incoming);
   if (refused) return refused;
+  // Read the whole body before answering. A route that doesn't need it would otherwise answer with the body
+  // still in flight, which Cloudflare's runtime treats as an error once the request was forwarded to a Durable Object.
+  let request = incoming;
+  if (incoming.method !== "GET" && incoming.method !== "HEAD") {
+    const text = await incoming.text();
+    if (text.length > MAX_BODY) return jsonError("That request is too large.", 413);
+    request = new Request(incoming.url, { method: incoming.method, headers: incoming.headers, body: text || null });
+  }
   const path = new URL(request.url).pathname;
   for (const route of routes) {
     const match = route.pattern.exec(path);
@@ -97,7 +110,14 @@ function sessionBody(host: Host, actor: Actor | undefined) {
 }
 
 function getSession(_request: Request, host: Host) {
-  return Response.json(sessionBody(host, host.actor));
+  const actor = host.actor;
+  // A sweep on every visit, as lease-based task boards do, so a hold that ran out is settled even if no alarm fired.
+  if (actor && !actor.busy) {
+    const lapsed = sweepHolds(actor.session);
+    for (const event of lapsed) observe(actor, event);
+    if (lapsed.length) persist(actor);
+  }
+  return Response.json(sessionBody(host, actor));
 }
 
 async function startSession(request: Request, host: Host) {
@@ -227,7 +247,14 @@ function run(_request: Request, host: Host) {
   const narrator = agentsOf(host).narrator();
   session.decisions = {};
   session.followups = {};
-  return ndjson<AgentEvent>(actor, (emit) => runAgent(session, narrator, emit, host.market ?? localMarket()), "run");
+  return ndjson<AgentEvent>(
+    actor,
+    async (emit) => {
+      await runAgent(session, narrator, emit, host.market ?? localMarket());
+      scheduleHolds(session, host.wake);
+    },
+    "run",
+  );
 }
 
 // Server-sent events for a run that's still going: replays what happened after `after`, then follows live
@@ -271,12 +298,31 @@ function events(request: Request, host: Host) {
 async function decision(request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
-  const input = await body(request, z.object({ decision: z.enum(["approved", "declined"]) }));
+  // `version` is the version the person was looking at. Like a fenced claim, an answer to an older version changes nothing.
+  const input = await body(request, z.object({ decision: z.enum(["approved", "declined"]), version: z.number().int().positive().optional() }));
   if (!input) return jsonError("Approve or decline.", 400);
   const { session } = actor;
-  if (!session.run?.opportunities.some((o) => o.id === id)) return jsonError("That proposal no longer exists.", 404);
+  const opportunity = session.run?.opportunities.find((o) => o.id === id);
+  if (!opportunity) return jsonError("That proposal no longer exists.", 404);
+  if (input.version !== undefined && input.version !== opportunity.version) return jsonError(`This proposal is now version ${opportunity.version}. Look at it again before you answer.`, 409);
+  if (session.decisions[id!] === "lapsed") return jsonError("This one lapsed before you answered, so the others are free again. Send your agent out again for a fresh one.", 409);
   if (session.decisions[id!]) return jsonError("You've already answered this one.", 409);
-  return ndjson<AgentEvent>(actor, (emit) => decide(session, id!, input.decision, emit, host.scheduleCheckIn));
+  return ndjson<AgentEvent>(actor, (emit) => decide(session, id!, input.decision, emit, (opportunityId, at) => host.wake?.({ kind: "check_in", opportunityId }, at)));
+}
+
+// The person needs more time to decide: the others hold their place a day longer, once.
+function hold(_request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  if (actor.busy) return jsonError("Your agent is still out. Wait for it to finish.", 409);
+  // A refusal (already answered, already extended, lapsed) is an answer, not a failure: say so before streaming anything.
+  let event: AgentEvent;
+  try {
+    event = extendHold(actor.session, id!, host.wake);
+  } catch (err) {
+    return jsonError((err as Error).message, 409);
+  }
+  return ndjson<AgentEvent>(actor, async (emit) => emit(event));
 }
 
 // After a yes: did it happen, and would you do it again?
@@ -321,7 +367,14 @@ async function renegotiateRoom(request: Request, host: Host, [id]: string[]) {
   const input = await body(request, z.object({ limit: z.number().finite().positive().max(100000) }));
   if (!input) return jsonError("Choose a new limit.", 400);
   const intent = actor.session.intents.find((i) => id!.startsWith(`${i.id}-`));
-  if (intent) record(actor, { kind: "you", room: id, text: `You changed your private ${intent.direction === "seek" ? "limit" : "floor"} for “${intent.summary}” to ${formatPrice(input.limit, intent.unit)}` });
+  if (intent) record(actor, { kind: "you", by: "you", room: id, text: `You changed your private ${intent.direction === "seek" ? "limit" : "floor"} for “${intent.summary}” to ${formatPrice(input.limit, intent.unit)}` });
   const narrator = agentsOf(host).narrator();
-  return ndjson<AgentEvent>(actor, (emit) => renegotiate(actor.session, id!, input.limit, narrator, emit, host.market ?? localMarket()), "renegotiate");
+  return ndjson<AgentEvent>(
+    actor,
+    async (emit) => {
+      await renegotiate(actor.session, id!, input.limit, narrator, emit, host.market ?? localMarket());
+      scheduleHolds(actor.session, host.wake);
+    },
+    "renegotiate",
+  );
 }

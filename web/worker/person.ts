@@ -2,6 +2,7 @@ import { Agent } from "agents";
 import { makeActor, observe, persist, broadcast, type Actor } from "../src/server/actor";
 import { handleApi } from "../src/server/api";
 import { checkInDue } from "../src/server/followup";
+import { lapse, type Wake } from "../src/server/holds";
 import type { Market } from "../src/server/market";
 import { agentModels } from "../src/server/models";
 import { createSession, upgradeSession, type Session } from "../src/server/store";
@@ -52,20 +53,27 @@ export class PersonAgent extends Agent<Env> {
       },
       market: this.market(),
       agents: agentModels(browserRunSource(this.env.BROWSER)),
-      // A Durable Object alarm wakes this agent when it's time to ask how it went, even if nobody has the page open.
-      scheduleCheckIn: (opportunityId, at) => {
-        void this.schedule(at, "checkInDue", { opportunityId });
+      // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,
+      // even if nobody has the page open.
+      wake: (job, at) => {
+        void this.schedule(at, "wake", job);
       },
     });
   }
 
-  async checkInDue({ opportunityId }: { opportunityId: string }) {
+  // Alarms fire at least once, so each job is safe to run twice: it re-checks the session and does nothing if it's settled.
+  async wake(job: Wake) {
     const actor = this.actor;
     if (!actor) return;
-    const event = checkInDue(actor.session, opportunityId);
+    const event = job.kind === "hold" ? lapse(actor.session, job.opportunityId) : checkInDue(actor.session, job.opportunityId);
     if (!event) return;
     observe(actor, event);
     broadcast(actor, event);
     persist(actor);
+  }
+
+  // Check-ins scheduled before `wake` existed still call this.
+  async checkInDue({ opportunityId }: { opportunityId: string }) {
+    return this.wake({ kind: "check_in", opportunityId });
   }
 }

@@ -1,4 +1,5 @@
 import { formatPrice, isInterest } from "../domain";
+import { holdUntil } from "../holds";
 import { intentBasis } from "../intake/profile";
 import { pause } from "../pace";
 import { localMarket, type Market } from "../market";
@@ -48,6 +49,8 @@ export async function renegotiate(session: Session, threadId: string, limit: num
     const opportunity = {
       ...opportunityFor(thread, session.name, (previous?.version ?? 0) + 1),
       basis: intentBasis(intent),
+      // A new version is a new proposal: it gets its own hold.
+      holdUntil: holdUntil(),
       ...(previous ? { previous: { version: previous.version, price: previous.price, terms: previous.terms } } : {}),
     };
     if (previous) delete session.decisions[previous.id];

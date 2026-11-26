@@ -16,12 +16,12 @@ import { Sidebar, type ConversationSummary } from "./Sidebar";
 const AGENT = "agent";
 const UNDO_MS = 8000;
 
-type Trust = Pick<PublicSession, "log" | "logIntact" | "checks" | "understanding" | "stale">;
-const NO_TRUST: Trust = { log: [], logIntact: true, checks: {}, understanding: null, stale: [] };
+type Trust = Pick<PublicSession, "log" | "logIntact" | "checks" | "disclosures" | "understanding" | "stale">;
+const NO_TRUST: Trust = { log: [], logIntact: true, checks: {}, disclosures: {}, understanding: null, stale: [] };
 type Pending = { id: string; decision: "approved" | "declined"; until: number };
 
 function trustOf(session: PublicSession): Trust {
-  return { log: session.log, logIntact: session.logIntact, checks: session.checks, understanding: session.understanding, stale: session.stale };
+  return { log: session.log, logIntact: session.logIntact, checks: session.checks, disclosures: session.disclosures, understanding: session.understanding, stale: session.stale };
 }
 
 function readWhy(): boolean {
@@ -226,7 +226,9 @@ export function InboxApp() {
           ? followup.done.text
           : followup.checkInDue
             ? "You're introduced. Did it happen?"
-            : offer && decision && last?.kind !== "message"
+            : decision === "lapsed"
+              ? "Lapsed unanswered. The others are free again"
+              : offer && decision && last?.kind !== "message"
           ? price
             ? decision === "approved"
               ? `You approved version ${offer.version} · ${price}`
@@ -254,6 +256,8 @@ export function InboxApp() {
                   ? { text: price ? "APPROVED" : "YOU'RE IN", tone: "good" }
               : decision === "declined"
                 ? { text: price ? "DECLINED" : "PASSED", tone: "muted" }
+                : decision === "lapsed"
+                  ? { text: "LAPSED", tone: "muted" }
                 : t.status === "no_fit"
                   ? { text: "NO FIT", tone: "muted" }
                   : !out && notPicked(t, run.opportunities)
@@ -361,6 +365,7 @@ export function InboxApp() {
               onUndo={() => setPending(null)}
               stale={offer ? trust.stale.includes(offer.id) : false}
               onCheckIn={runs.checkIn}
+              onExtend={runs.extend}
               onRenegotiate={(limit) => renegotiate(thread.id, limit)}
               onSay={(text) => runs.say(thread.id, text)}
               onBack={() => select(null)}
@@ -408,6 +413,7 @@ export function InboxApp() {
                   you={name}
                   shortlist={run.shortlists.find((s) => s.options.some((o) => o.threadId === thread.id))}
                   checks={trust.checks[thread.id] ?? []}
+                  disclosures={trust.disclosures[thread.id] ?? []}
                   opportunity={offer} limit={limitFor(thread.id)} busy={running} onMessage={openPrivate} />
               ) : (
                 <AgentDetails

@@ -99,6 +99,7 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
       for await (const event of await events) {
         setRun((s) => reduce(s, event));
         if (event.type === "decision") setDecisions((d) => ({ ...d, [event.opportunityId]: event.decision }));
+        if (event.type === "hold" && event.stage === "lapsed") setDecisions((d) => ({ ...d, [event.opportunityId]: "lapsed" }));
         onEvent?.(event);
       }
     } catch (err) {
@@ -137,9 +138,18 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
 
   // A yes or no streams back what happens next in the room: the others' answers, the introduction, the check-in.
   const decide = async (id: string, decision: "approved" | "declined") => {
-    const threadId = run.opportunities.find((o) => o.id === id)?.threadId ?? null;
+    const opportunity = run.opportunities.find((o) => o.id === id);
     setDecisions((d) => ({ ...d, [id]: decision }));
-    await stream(api.decide(id, decision), threadId);
+    await stream(api.decide(id, decision, opportunity?.version), opportunity?.threadId ?? null);
+    // A refused answer (the proposal lapsed or changed) leaves the server's record as the truth.
+    const { session } = await api.session();
+    if (session) setDecisions(session.decisions);
+  };
+
+  // Asks the others to hold a proposal a day longer.
+  const extend = async (id: string) => {
+    const threadId = run.opportunities.find((o) => o.id === id)?.threadId ?? null;
+    await stream(api.hold(id), threadId);
   };
 
   const checkIn = async (id: string, answer: CheckIn) => {
@@ -169,5 +179,5 @@ export function useRun(onEvent?: (event: AgentEvent | { type: "done" }) => void)
     return id;
   };
 
-  return { run, running, busyRoom, decisions, load, resume, start, renegotiate, decide, checkIn, say, openPrivate };
+  return { run, running, busyRoom, decisions, load, resume, start, renegotiate, decide, extend, checkIn, say, openPrivate };
 }

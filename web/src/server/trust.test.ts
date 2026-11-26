@@ -61,7 +61,7 @@ describe("faithfulness checks per room", () => {
     const opportunity = session.run!.opportunities[0]!;
     await decide(session, opportunity.id, "approved", () => {});
     const checks = checksFor(session, opportunity.threadId);
-    expect(checks.map((c) => c.label)).toEqual(["Price within your limit", "Your limit stayed private", "Nothing shared before your yes", "Based on what you confirmed", "Typed moves only"]);
+    expect(checks.map((c) => c.label)).toEqual(["Price within your limit", "Your limit stayed private", "Nothing shared before your yes", "Based on what you confirmed", "Your yes covers these exact terms", "Everyone said yes for themself", "Typed moves only"]);
     expect(checks.every((c) => c.ok)).toBe(true);
   });
 

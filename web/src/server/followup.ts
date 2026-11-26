@@ -2,6 +2,8 @@ import { formatPrice } from "./domain";
 import { listWords } from "./negotiation/plan";
 import { runStats } from "./negotiation/run";
 import type { AgentEvent, CheckIn, Decision, Opportunity } from "./negotiation/types";
+import { lapse } from "./holds";
+import { everyoneSaidYes, termsOf, yesStillStands } from "./negotiation/terms";
 import { pause } from "./pace";
 import { isStale } from "./intake/profile";
 import type { Session } from "./store";
@@ -40,6 +42,10 @@ export async function decide(
   schedule?: (opportunityId: string, at: Date) => void,
 ): Promise<void> {
   const opportunity = opportunityOf(session, id);
+  // A hold that ran out while the page sat open still counts: check the clock before taking the answer.
+  const lapsed = lapse(session, id);
+  if (lapsed) emit(lapsed);
+  if (session.decisions[id] === "lapsed") throw new Error("This one lapsed before you answered, so the others are free again. Send your agent out again for a fresh one.");
   if (session.decisions[id]) throw new Error("You've already answered this one.");
   if (decision === "approved" && isStale(session, opportunity))
     throw new Error("You changed what you asked for after this was agreed, so it no longer stands. Send your agent out again for a fresh proposal.");
@@ -66,6 +72,7 @@ export async function decide(
   });
 
   session.decisions[id] = decision;
+  if (decision === "approved") opportunity.approvedTerms = termsOf(opportunity);
   send({ type: "decision", threadId, opportunityId: id, decision });
   await pause(500);
 
@@ -84,10 +91,19 @@ export async function decide(
       "You said yes, so your agent tells the room. It only says yes to these exact terms.",
     ),
   );
+  // Everyone answers for themself. In the pilot the other members are simulated and say yes; the introduction
+  // still waits on every one of them, so when real members answer on their own time nothing else has to change.
+  const approvals: Record<string, "yes" | "waiting"> = Object.fromEntries([[you, "yes"], ...others.map((name) => [name, "waiting"])]);
+  opportunity.approvals = approvals;
   await pause(900);
   for (const name of others) {
+    approvals[name] = "yes";
     send(message("them", `${name}'s agent`, "JOIN", plan ? `${name} is in too.` : `${name} approved too.`, `${name} said yes for themself. Their agent can't do it for them.`));
     await pause(700);
+  }
+  if (!everyoneSaidYes(opportunity)) {
+    send({ type: "done", stats: runStats(session) });
+    return;
   }
 
   const due = checkInAt(opportunity);
@@ -117,6 +133,8 @@ export function checkInDue(session: Session, id: string): AgentEvent | null {
   const followup = session.followups[id];
   const opportunity = session.run?.opportunities.find((o) => o.id === id);
   if (!followup || followup.stage !== "introduced" || followup.asked || !opportunity || !session.run) return null;
+  // Checked again when the alarm fires, not just when it was set: the yes must still stand.
+  if (session.decisions[id] !== "approved" || !yesStillStands(opportunity)) return null;
   followup.asked = true;
   const event: AgentEvent = { type: "followup", threadId: opportunity.threadId, opportunityId: id, stage: "check_in", text: `It's ${checkInMoment(opportunity).replace(/^after /, "past ")}. Did it happen?` };
   session.run.events.push(event);

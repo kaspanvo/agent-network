@@ -2,7 +2,7 @@ import { formatPrice, isInterest } from "./domain";
 import type { IntakeEvent } from "./intake/types";
 import { listWords } from "./negotiation/plan";
 import type { AgentEvent } from "./negotiation/types";
-import type { LogEntry, Session } from "./store";
+import type { LogActor, LogEntry, Session } from "./store";
 
 export type Loggable = AgentEvent | IntakeEvent;
 type Entry = Omit<LogEntry, "at">;
@@ -15,7 +15,7 @@ function quote(text: string): string {
 }
 
 // The other people's agents in a room, in words: "Diego's agent", or "Lena, Rita and Bruno's agents".
-function audience(session: Session, threadId: string): string {
+export function audience(session: Session, threadId: string): string {
   const names = new Set<string>();
   for (const e of session.run?.events ?? []) {
     if (e.type === "discover" && e.threadId === threadId) names.add(e.who);
@@ -25,9 +25,23 @@ function audience(session: Session, threadId: string): string {
   return list.length ? `${listWords(list)}'s agent${list.length > 1 ? "s" : ""}` : "the room";
 }
 
+// Who acted, for an entry: the person, their agent, or Open's own code (the matcher, the privacy check, a hold running out).
+function actorOf(event: Loggable, entry: Entry): LogActor {
+  if (entry.kind === "you" || event.type === "ready") return "you";
+  if (event.type === "decision") return event.decision === "lapsed" ? "open" : "you";
+  if (event.type === "hold") return event.stage === "lapsed" ? "open" : "you";
+  if (entry.kind === "withheld" || (event.type === "message" && event.from === "open")) return "open";
+  return "agent";
+}
+
 // What goes in the person's activity log for an event, if anything: what their agent did, said or shared, and with whom.
 // Other agents' messages aren't logged; the log is about what was done in your name.
 export function entryFor(session: Session, event: Loggable): Entry | null {
+  const entry = describe(session, event);
+  return entry && { ...entry, by: actorOf(event, entry) };
+}
+
+function describe(session: Session, event: Loggable): Entry | null {
   switch (event.type) {
     case "intent": {
       const i = event.intent;
@@ -77,10 +91,18 @@ export function entryFor(session: Session, event: Loggable): Entry | null {
       const price = o.price !== null && o.unit ? `, ${formatPrice(o.price, o.unit)}` : "";
       return { kind: "found", room: o.threadId, text: o.kind === "plan" ? `Brought you a plan: ${o.title}` : `Brought you version ${o.version}: ${o.title}${price}` };
     }
+    case "hold": {
+      const o = session.run?.opportunities.find((x) => x.id === event.opportunityId);
+      const title = o?.title ?? "a proposal";
+      return event.stage === "lapsed"
+        ? { kind: "hold", room: event.threadId, text: `“${title}” lapsed unanswered. Your agent told ${audience(session, event.threadId)} they're free again` }
+        : { kind: "hold", room: event.threadId, text: `You asked ${audience(session, event.threadId)} to hold “${title}” a day longer` };
+    }
     case "decision": {
       const o = session.run?.opportunities.find((x) => x.id === event.opportunityId);
       const title = o?.title ?? "a proposal";
       const plan = o?.kind === "plan";
+      if (event.decision === "lapsed") return null;
       const text =
         event.decision === "approved"
           ? plan

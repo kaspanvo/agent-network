@@ -5,6 +5,7 @@ import { LISBON_PILOT } from "../population";
 import { localMarket, type Market } from "../market";
 import type { Session } from "../store";
 import { guard } from "../guard";
+import { holdUntil } from "../holds";
 import type { Line, Narrator } from "./narrator";
 import { circleScript, planCircles, planOpportunity, type CirclePlan } from "../rooms/circle";
 import { listWords } from "./plan";
@@ -206,6 +207,7 @@ export async function runAgent(session: Session, narrator: Narrator, emit: (even
   for (const opportunity of opportunities) {
     const intent = session.intents.find((i) => i.id === opportunity.intentId);
     if (intent) opportunity.basis = intentBasis(intent);
+    opportunity.holdUntil = holdUntil();
     session.run.opportunities.push(opportunity);
     send({ type: "opportunity", opportunity });
     await pause(500);
