@@ -8,7 +8,7 @@ import { formatPrice, isInterest, lowerFirst } from "@/server/domain";
 import { RECAP_CHANGE, RECAP_CONFIRMED } from "@/server/intake/types";
 import { ChoicesWidget, NumberWidget, PairsWidget, RecapWidget } from "../start/Widgets";
 import { AgentAvatar, AvatarStack } from "./Avatar";
-import { ConversationHeader, Dots, JumpToLatest, useStickToBottom } from "./ChatFrame";
+import { ConversationHeader, Dots, JumpToLatest, QuickReplies, useStickToBottom } from "./ChatFrame";
 import { Composer } from "./Composer";
 import { priceOf, statusOf, threadTitle, type RunState, type Shortlist } from "./runState";
 
@@ -245,6 +245,8 @@ export function AgentChat(props: {
               ),
             )}
 
+            <QuickReplies options={replies} onPick={sendText} />
+
             {awaitingAgent && (
               <div className="flex gap-3">
                 <AgentAvatar />
@@ -332,7 +334,7 @@ export function AgentChat(props: {
         {showJump && <JumpToLatest onClick={jump} />}
       </div>
 
-      <Composer placeholder={busy ? "Your agent is replying…" : "Tell your agent anything"} busy={busy} onSend={sendText} onStop={props.onStop} suggestions={replies} />
+      <Composer placeholder={busy ? "Your agent is replying…" : "Tell your agent anything"} busy={busy} onSend={sendText} onStop={props.onStop} />
     </section>
   );
 }

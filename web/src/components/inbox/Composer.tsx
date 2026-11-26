@@ -24,13 +24,11 @@ export function Composer({
   busy,
   onSend,
   onStop,
-  suggestions = [],
 }: {
   placeholder: string;
   busy: boolean;
   onSend: (text: string) => void;
   onStop?: () => void;
-  suggestions?: string[];
 }) {
   const [text, setText] = useState("");
   const [listening, setListening] = useState(false);
@@ -81,20 +79,6 @@ export function Composer({
   return (
     <div className="shrink-0 border-t border-line bg-paper/95 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur sm:px-6">
       <div className="mx-auto flex max-w-[760px] flex-col gap-2">
-        {suggestions.length > 0 && !busy && (
-          <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-0.5" role="group" aria-label="Suggested replies">
-            {suggestions.map((s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => onSend(s)}
-                className="min-h-10 shrink-0 animate-rise rounded-full border border-[#d5d9e1] bg-white px-4 text-sm text-ink hover:border-ink"
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();

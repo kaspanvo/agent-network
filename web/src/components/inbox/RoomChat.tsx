@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { formatPrice, lowerFirst, type Unit } from "@/server/domain";
 import type { Card, CheckIn, Opportunity, Outcome } from "@/server/negotiation/types";
 import { AgentAvatar, Avatar, AvatarStack } from "./Avatar";
-import { ConversationHeader, Dots, JumpToLatest, useStickToBottom } from "./ChatFrame";
+import { ConversationHeader, Dots, JumpToLatest, QuickReplies, useStickToBottom } from "./ChatFrame";
 import { Composer } from "./Composer";
 import { followupOf, priceOf, statusOf, threadTitle, type Thread, type TimelineItem } from "./runState";
 
@@ -317,6 +317,14 @@ export function RoomChat(props: {
                 <Item key={i} item={item} previous={thread.timeline[i - 1]} showWhy={showWhy} you={props.you} deal={deal} />
               ),
             )}
+            <QuickReplies
+              label="Things you could ask"
+              options={live || busy || youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : starters(thread.mode, thread.who, !!thread.grouped)}
+              onPick={(text) => {
+                jump();
+                props.onSay(text);
+              }}
+            />
             {live && (
               <div className="flex gap-2.5">
                 <span className="w-8 shrink-0" />
@@ -455,7 +463,6 @@ export function RoomChat(props: {
             jump();
             props.onSay(text);
           }}
-          suggestions={youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : starters(thread.mode, thread.who, !!thread.grouped)}
         />
       )}
     </section>

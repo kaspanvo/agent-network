@@ -100,3 +100,24 @@ export function Dots({ label }: { label: string }) {
     </span>
   );
 }
+
+// Replies the person could send, attached to the message they answer, the way messaging apps show quick replies:
+// in the conversation, on the person's side, wrapping onto new lines. They go away once something is sent.
+export function QuickReplies({ options, onPick, label = "Suggested replies", disabled = false }: { options: string[]; onPick: (text: string) => void; label?: string; disabled?: boolean }) {
+  if (options.length === 0) return null;
+  return (
+    <div role="group" aria-label={label} className="flex max-w-[90%] animate-rise flex-wrap justify-end gap-2 self-end">
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(option)}
+          className="min-h-10 rounded-[20px_20px_6px_20px] border border-ink/25 bg-white px-4 py-2 text-left text-[15px] leading-snug text-ink transition-colors hover:border-ink hover:bg-paper focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-40"
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
