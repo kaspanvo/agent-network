@@ -1,8 +1,5 @@
-import type { Metadata } from "next";
-import { StartApp } from "@/components/start/StartApp";
-
-export const metadata: Metadata = { title: "Set up your agent · Open" };
+import { redirect } from "next/navigation";
 
 export default function StartPage() {
-  return <StartApp />;
+  redirect("/inbox");
 }

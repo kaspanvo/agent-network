@@ -1,13 +1,11 @@
-import { TIME_CONDITIONS, type Intent, type Population, type ProfileIntent, type Unit } from "../domain";
+import { isInterest, TIME_CONDITIONS, type Intent, type Population, type ProfileIntent, type Unit } from "../domain";
 import type { Move, ThreadPlan } from "./types";
 
-const ROUNDS = 3;
-
-function timesOf(conditions: string[]): string[] {
+export function timesOf(conditions: string[]): string[] {
   return conditions.filter((c) => (TIME_CONDITIONS as readonly string[]).includes(c));
 }
 
-function compatible(a: string[], b: string[]): boolean {
+export function compatible(a: string[], b: string[]): boolean {
   return a.length === 0 || b.length === 0 || a.some((t) => b.includes(t));
 }
 
@@ -17,30 +15,34 @@ export function listWords(items: string[]): string {
 
 const UNIT_WORD: Record<Unit, string> = { hour: "per hour", month: "per month", "one-off": "as a one-off" };
 
-// Concession bargaining. Each agent knows only its own limit, opens away from it and concedes evenly.
-// An agent accepts the other side's last offer as soon as its own next offer would meet it, so no one crosses their limit.
-export function bargain(buyerMax: number, sellerFloor: number, firstMover: "buyer" | "seller", youAre: "buyer" | "seller") {
-  const bid = (t: number) => Math.min(buyerMax, Math.floor(buyerMax * 0.7 + buyerMax * 0.3 * (t / ROUNDS)));
-  const ask = (t: number) => Math.max(sellerFloor, Math.ceil(sellerFloor * 1.3 - sellerFloor * 0.3 * (t / ROUNDS)));
-  const who = (side: "buyer" | "seller"): Move["from"] => (side === youAre ? "you" : "them");
-  const order: ("buyer" | "seller")[] = firstMover === "buyer" ? ["buyer", "seller"] : ["seller", "buyer"];
-  const moves: Move[] = [];
-  const last: { buyer?: number; seller?: number } = {};
-
-  for (let t = 0; t <= ROUNDS; t++) {
-    for (const side of order) {
-      const amount = side === "buyer" ? bid(t) : ask(t);
-      const theirs = side === "buyer" ? last.seller : last.buyer;
-      if (theirs !== undefined && (side === "buyer" ? amount >= theirs : amount <= theirs)) {
-        moves.push({ from: who(side), action: "ACCEPT", amount: theirs });
-        return { moves, price: theirs };
-      }
-      moves.push({ from: who(side), action: moves.length === 0 ? "PROPOSE" : "COUNTER", amount });
-      last[side] = amount;
-    }
+// Sealed offers. Each agent sends its person's limit to Open's matcher (this function) and nothing else.
+// If the limits overlap, the price lands at a random point in the middle of the overlap, so the price
+// alone never tells either side the other's limit. There are no rounds, so there's no trail of concessions to read.
+// Research on agent negotiation found models disclose their person's limit in 2-80% of episodes, and that limits
+// can be inferred from how offers move; keeping the number out of the model and out of the trajectory avoids both.
+export function settle(buyerMax: number, sellerFloor: number, seed: string, youAre: "buyer" | "seller") {
+  const them: Move["from"] = "them";
+  const moves: Move[] = [
+    { from: "you", action: "SEAL", amount: null },
+    { from: them, action: "SEAL", amount: null },
+  ];
+  if (buyerMax < sellerFloor) {
+    moves.push({ from: "open", action: "NO_MATCH", amount: null });
+    return { moves, price: null as number | null, youAre };
   }
-  moves.push({ from: who(youAre), action: "DECLINE", amount: null });
-  return { moves, price: null };
+  const u = 0.35 + 0.3 * unitRandom(seed);
+  const price = Math.min(buyerMax, Math.max(sellerFloor, Math.round(sellerFloor + u * (buyerMax - sellerFloor))));
+  moves.push({ from: "open", action: "MATCH", amount: price });
+  return { moves, price: price as number | null, youAre };
+}
+
+// A number in [0, 1) that is always the same for the same seed.
+export function unitRandom(seed: string): number {
+  let h = 2166136261;
+  for (const ch of seed) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  h = Math.imul(h ^ (h >>> 15), 2246822507);
+  h = Math.imul(h ^ (h >>> 13), 3266489909);
+  return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 }
 
 export function planThreads(intents: ProfileIntent[], population: Population): ThreadPlan[] {
@@ -48,7 +50,7 @@ export function planThreads(intents: ProfileIntent[], population: Population): T
   const memberOf = (c: Intent) => population.members.find((m) => m.id === c.memberId)!;
 
   for (const intent of intents) {
-    if (intent.status !== "confirmed" || intent.price === null) continue;
+    if (intent.status !== "confirmed" || intent.price === null || isInterest(intent)) continue;
     const yourTimes = timesOf(intent.conditions);
     const candidates = population.intents.filter((c) => c.tag === intent.tag && c.direction !== intent.direction);
 
@@ -62,6 +64,7 @@ export function planThreads(intents: ProfileIntent[], population: Population): T
         intentSummary: intent.summary,
         direction: intent.direction,
         limit: intent.price,
+        theirLimit: c.price,
         unit: intent.unit,
         counterpart: { memberId: member.id, name: member.name, blurb: c.summary },
         room: [],
@@ -95,9 +98,10 @@ export function planThreads(intents: ProfileIntent[], population: Population): T
             floor = group.perPerson;
           }
         }
-        result = bargain(intent.price, floor, "buyer", "buyer");
+        thread.theirLimit = floor;
+        result = settle(intent.price, floor, thread.id + intent.price, "buyer");
       } else {
-        result = bargain(c.price, intent.price, "seller", "seller");
+        result = settle(c.price, intent.price, thread.id + intent.price, "seller");
       }
 
       thread.moves = result.moves;

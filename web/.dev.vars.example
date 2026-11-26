@@ -1,0 +1,8 @@
+# Copy to .dev.vars for `npm run dev:cf`. Never commit .dev.vars.
+# Leave everything unset to run the demo agent.
+# ANTHROPIC_API_KEY=
+# Or route through Cloudflare AI Gateway with the key stored there:
+# OPEN_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<account id>/open/anthropic
+# OPEN_AI_GATEWAY_BYOK=true
+# CF_AIG_TOKEN=
+OPEN_PACE=1

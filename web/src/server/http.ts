@@ -1,13 +1,15 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { NextRequest } from "next/server";
-import { loadSession, saveSession, SESSION_COOKIE, type Session } from "./store";
-
-export function currentSession(request: NextRequest): Session | undefined {
-  return loadSession(request.cookies.get(SESSION_COOKIE)?.value);
-}
+import type { Loggable } from "./activity";
+import { allow, broadcast, finish, observe, persist, type Actor } from "./actor";
+import type { AgentEvent } from "./negotiation/types";
 
 export function jsonError(message: string, status: number): Response {
   return Response.json({ error: message }, { status });
+}
+
+// For routes that reach other agents or the model: null when the person may go ahead, otherwise the refusal.
+export function rateLimited(actor: Actor): Response | null {
+  return allow(actor) ? null : jsonError("That's a lot at once. Give it a few seconds and try again.", 429);
 }
 
 function friendly(err: unknown): string {
@@ -17,22 +19,43 @@ function friendly(err: unknown): string {
   return err instanceof Error ? err.message : "Something went wrong.";
 }
 
-// Streams newline-delimited JSON events, then saves the session whatever happened.
-export function ndjson<E>(session: Session, work: (emit: (event: E | { type: "error"; message: string }) => void) => Promise<void>): Response {
+// Streams newline-delimited JSON events, logs each one, then saves the session whatever happened.
+// When the browser stops reading (the person pressed stop or left), `signal` aborts the work.
+// `busy` names work that holds the agent until it ends, like a run; a second request for it waits its turn by being refused.
+export function ndjson<E extends Loggable>(
+  actor: Actor,
+  work: (emit: (event: E | { type: "error"; message: string }) => void, signal: AbortSignal) => Promise<void>,
+  busy?: string,
+): Response {
   const encoder = new TextEncoder();
+  const abort = new AbortController();
+  let open = true;
   const body = new ReadableStream({
     async start(controller) {
-      const emit = (event: unknown) => controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      const emit = (event: E | { type: "error"; message: string } | { type: "done" }) => {
+        if (event.type !== "done" && event.type !== "error") observe(actor, event as Loggable);
+        // Work that holds the agent (a run) can be followed live from another tab or after a reload.
+        if (busy && "type" in event) broadcast(actor, event as AgentEvent);
+        if (open) controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+      };
+      if (busy) actor.busy = busy;
       try {
-        await work(emit);
+        await work(emit, abort.signal);
       } catch (err) {
-        console.error(err);
-        emit({ type: "error", message: friendly(err) });
+        if (!abort.signal.aborted) {
+          console.error(err);
+          emit({ type: "error", message: friendly(err) });
+        }
       } finally {
-        saveSession(session);
+        if (busy) finish(actor);
+        persist(actor);
         emit({ type: "done" });
-        controller.close();
+        if (open) controller.close();
       }
+    },
+    cancel() {
+      open = false;
+      abort.abort();
     },
   });
   return new Response(body, { headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" } });

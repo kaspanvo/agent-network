@@ -1,36 +1,36 @@
-import { threadState, type Thread } from "./state";
+import type { Thread, ThreadStatus } from "../inbox/runState";
 
 const W = 560;
 const H = 260;
 const CX = W / 2;
 const CY = H / 2;
 
-const COLORS = {
-  talking: { line: "#ff5a1f", fill: "#ff5a1f", stroke: "none", dash: undefined },
-  agreed: { line: "#22c55e", fill: "#22c55e", stroke: "none", dash: undefined },
+const COLORS: Record<ThreadStatus, { line: string; fill: string; stroke: string; dash?: string }> = {
+  talking: { line: "#ff5a1f", fill: "#ff5a1f", stroke: "none" },
+  agreed: { line: "#22c55e", fill: "#22c55e", stroke: "none" },
+  open: { line: "#0f172a", fill: "#ffffff", stroke: "#0f172a" },
   no_fit: { line: "#b7bfcc", fill: "#ffffff", stroke: "#b7bfcc", dash: "4 4" },
-} as const;
+};
 
 export function NetworkGraph({ threads, activeId, running }: { threads: Thread[]; activeId: string | null; running: boolean }) {
   const placed = threads.map((thread, i) => {
     const angle = -Math.PI / 2 + (i * 2 * Math.PI) / Math.max(threads.length, 5) + 0.35;
     return { thread, x: CX + Math.cos(angle) * 200, y: CY + Math.sin(angle) * 92 };
   });
-  const summary = threads.length === 0 ? "Your agent hasn't met anyone yet." : threads.map((t) => `${t.who}: ${threadState(t).replace("_", " ")}`).join("; ");
+  const summary = threads.length === 0 ? "Your agent hasn't met anyone yet." : threads.map((t) => `${t.who}: ${t.status.replace("_", " ")}`).join("; ");
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Your agent's network. ${summary}`} className="block h-auto w-full">
       {placed.map(({ thread, x, y }) => {
-        const c = COLORS[threadState(thread)];
+        const c = COLORS[thread.status];
         return <line key={`l-${thread.id}`} x1={CX} y1={CY} x2={x} y2={y} stroke={c.line} strokeWidth={thread.id === activeId ? 2.5 : 1.5} strokeDasharray={c.dash} />;
       })}
       {placed.map(({ thread, x, y }) => {
-        const state = threadState(thread);
-        const c = COLORS[state];
-        const roomMembers = thread.room?.members.slice(1).filter((m) => m !== thread.who) ?? [];
+        const c = COLORS[thread.status];
+        const members = thread.others.filter((o) => o !== thread.who);
         return (
           <g key={thread.id} className="animate-rise">
-            {roomMembers.map((member, j) => {
+            {members.map((member, j) => {
               const mx = x + (j === 0 ? -34 : 34);
               const my = y + 30;
               return (
@@ -43,7 +43,7 @@ export function NetworkGraph({ threads, activeId, running }: { threads: Thread[]
                 </g>
               );
             })}
-            {state === "talking" && running && thread.id === activeId && (
+            {thread.status === "talking" && running && thread.id === activeId && (
               <circle cx={x} cy={y} r={20} fill="none" stroke="#ff5a1f" strokeWidth={1.5} opacity={0.5} className="animate-blink" />
             )}
             <circle cx={x} cy={y} r={13} fill={c.fill} stroke={c.stroke} strokeWidth={2} />

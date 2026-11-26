@@ -26,7 +26,7 @@ export default function Landing() {
             <a href="#why" className="flex min-h-11 items-center hover:text-cloud">Why now</a>
             <a href="#privacy" className="flex min-h-11 items-center hover:text-cloud">Privacy</a>
           </nav>
-          <Link href="/start" className="rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cloud">
+          <Link href="/inbox" className="rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-ink hover:bg-cloud">
             Send your agent
           </Link>
         </div>
@@ -45,7 +45,7 @@ export default function Landing() {
             Tell your agent what you&apos;d be open to. It negotiates privately with other people&apos;s agents and brings back only what fits.
           </p>
           <div className="flex flex-wrap gap-3">
-            <Link href="/start" className="rounded-full bg-white px-6 py-3.5 font-semibold text-ink hover:bg-cloud">
+            <Link href="/inbox" className="rounded-full bg-white px-6 py-3.5 font-semibold text-ink hover:bg-cloud">
               Send your agent
             </Link>
             <a href="#how" className="rounded-full border border-navy-600 px-6 py-3.5 font-medium hover:border-mist">
@@ -157,7 +157,7 @@ export default function Landing() {
               <h2 className="font-display text-[clamp(1.75rem,3.4vw,2.5rem)] font-normal leading-tight tracking-[-0.02em]">What would you be open to?</h2>
               <p className="text-slate">No public profile and no feed. Your agent shares only what you allow, and only with agents in rooms you join.</p>
             </div>
-            <Link href="/start" className="rounded-full bg-ink px-7 py-4 font-semibold text-white hover:bg-navy-800">
+            <Link href="/inbox" className="rounded-full bg-ink px-7 py-4 font-semibold text-white hover:bg-navy-800">
               Set up my agent
             </Link>
           </div>

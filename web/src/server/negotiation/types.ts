@@ -1,14 +1,22 @@
 import type { Unit } from "../domain";
 
-export type Move = { from: "you" | "them"; action: "PROPOSE" | "COUNTER" | "ACCEPT" | "DECLINE"; amount: number | null };
+// Deals are settled by sealed offers: each agent sends its person's limit to Open's matcher, which is code.
+// "open" is the matcher. PROPOSE/COUNTER/ACCEPT/DECLINE remain for runs saved before sealed offers.
+export type Move = {
+  from: "you" | "them" | "open";
+  action: "PROPOSE" | "COUNTER" | "ACCEPT" | "DECLINE" | "SEAL" | "MATCH" | "NO_MATCH";
+  amount: number | null;
+};
 
 export type ThreadPlan = {
   id: string;
   intentId: string;
   intentSummary: string;
   direction: "seek" | "offer";
-  // The limit of the person using the app. Never sent to the other side.
+  // The limit of the person using the app. Never sent to the other side, or to the model.
   limit: number;
+  // The other member's limit. Only the matcher sees it: the market strips it before a plan reaches the person's agent.
+  theirLimit?: number;
   unit: Unit;
   counterpart: { memberId: string; name: string; blurb: string };
   // Other members who join when the thread is a group room.
@@ -20,25 +28,63 @@ export type ThreadPlan = {
   agreedPrice: number | null;
 };
 
+// A rich attachment on a room message: something happening, or a paid offer someone mentioned.
+export type Card =
+  | { kind: "happening"; title: string; when: string; where: string; cost: string; postedBy: string }
+  | { kind: "offer"; title: string; who: string };
+
+// What lands with the person for a decision. A deal has a price; a plan is something to do together.
 export type Opportunity = {
   id: string;
   threadId: string;
   intentId: string;
+  kind?: "deal" | "plan";
   title: string;
-  price: number;
-  unit: Unit;
+  price: number | null;
+  unit: Unit | null;
   people: string[];
   terms: string[];
   reasons: string[];
   version: number;
+  // A fingerprint of the intent this was agreed under (what, limit, times). If the person changes that intent,
+  // the proposal no longer stands: like a payment mandate, approval only covers what was actually authorised.
+  basis?: string;
+  // What the version before said, so the person sees what changed.
+  previous?: { version: number; price: number | null; terms: string[] };
 };
+
+// Deal rooms negotiate a price. Circles are rooms around a shared interest. Private rooms are one-to-one with one member's agent.
+export type RoomMode = "deal" | "circle" | "private";
+
+// Every message in a room is a typed move; the text only explains it. Deal moves carry amounts the engine decided.
+// Circle moves share, ask, plan and join. "SAY" is the person's own message; agents answer it, share something, or pass it on.
+export type Action = Move["action"] | "SHARE" | "ASK" | "PLAN" | "JOIN" | "SAY" | "ANSWER" | "PASS";
+
+// One offer your agent weighed for an intent before choosing.
+export type ShortlistOption = { threadId: string; who: string; price: number; unit: Unit; group: boolean; schedule: string | null };
+
+// How a check-in after a yes went.
+export type CheckIn = "again" | "once" | "missed";
+export type Decision = "approved" | "declined";
 
 export type AgentEvent =
   | { type: "status"; text: string }
-  | { type: "discover"; threadId: string; who: string; about: string; why: string }
+  | { type: "discover"; threadId: string; who: string; about: string; why: string; mode?: RoomMode }
   | { type: "room"; threadId: string; members: string[]; why: string }
-  | { type: "message"; threadId: string; from: "you" | "them"; who: string; action: Move["action"]; amount: number | null; unit: Unit; text: string; why: string }
-  | { type: "outcome"; threadId: string; result: "agreed" | "no_fit"; why: string }
+  | { type: "note"; threadId: string; text: string }
+  // `from: "person"` is the person using the app, writing in the room themself.
+  // `from: "open"` is Open's matcher, which sets prices in code. `withheld` marks a message the privacy check replaced.
+  | { type: "message"; threadId: string; from: "you" | "them" | "person" | "open"; who: string; action: Action; amount: number | null; unit: Unit | null; text: string; why: string; card?: Card; withheld?: boolean }
+  | { type: "outcome"; threadId: string; result: "agreed" | "no_fit" | "open"; why: string }
   | { type: "opportunity"; opportunity: Opportunity }
+  // Your agent heard every offer for one intent before choosing, in random order, and shows what it compared.
+  | { type: "shortlist"; intentId: string; about: string; heard: number; options: ShortlistOption[]; chosen: string; why: string }
+  | { type: "decision"; threadId: string; opportunityId: string; decision: Decision }
+  // After a yes: everyone else says yes and you're introduced, then your agent checks whether it happened.
+  | { type: "followup"; threadId: string; opportunityId: string; stage: "introduced" | "check_in" | "done"; text: string; answer?: CheckIn }
   | { type: "error"; message: string }
   | { type: "done"; stats: { contacted: number; rooms: number; ready: number } };
+
+export function isPlan(opportunity: Opportunity): boolean {
+  return opportunity.kind === "plan";
+}

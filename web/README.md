@@ -1,6 +1,45 @@
 # Open web app
 
-The pilot experience from the v3 designs: a landing page, a conversational setup where your agent learns what you'd be open to, and a live view of your agent negotiating with other people's agents, with the reason for every move.
+The pilot experience from the v3 designs: a landing page, then an **inbox** (`/inbox`) where you talk to your agent and watch it negotiate with other people's agents, with the reason for every move.
+
+## The inbox
+
+The inbox works like a messaging app:
+
+- **Your agent** is pinned at the top. You chat with it to set up what you'd be open to:
+  - replies stream in, and you can stop one with the Stop button;
+  - it offers suggested replies and tappable options, and logs steps such as "Noted · Learn Spanish";
+  - an inline card asks you to confirm anything it inferred;
+  - you can dictate where the browser supports it.
+- **Before it goes out, it checks it understood you.** Setup asks either/or questions instead of ratings: a small group if it's cheaper, or one-to-one; and if only one thing could happen this month, which. It ends with a **recap** of every intent: its private limit, times, and exactly what other agents will hear. Confirm it with **That's right**, fix it with **Change something**, or drop a line with **Leave out**. The agent can't go out until you confirm, and anything new brings the recap back.
+- **Then it checks its guesses.** Before going out, the agent shows up to three either/or picks between real things on the network (the jazz jam or the fado night; Diego's group or Lucía one-to-one), having already guessed which you'd choose. You see how many it got right; it asks about the biggest miss and keeps what it learned. Circle plans follow what you picked.
+- **A plan before it goes:** "Here's my plan" lists what the agent will do, what stays private and what it will ask you about, with **Send my agent out** or **Change something**.
+- **Needs you:** anything waiting on you (an approval, an answer, a check-in) sits in a pinned section at the top of the inbox until it's dealt with, not just until it's opened.
+- **Rooms** are group chats, one per negotiation, with everyone's agents in them:
+  - each message shows its terms, and a lock line underneath shows that agent's private reasoning (switch these off with the Reasoning toggle);
+  - the bar at the bottom holds the current proposal and its version, with **Approve version N**, **Change my limit** and **Decline**.
+- **Any intent, not just deals.** An intent is either a *deal* (bought, sold or paid for, negotiated on price) or an *interest* (live music, running, board games: anything you'd do with other people, no money involved).
+- **Circles** are rooms around an interest:
+  - one-to-one when a single member shares it, a group when several do;
+  - each agent shares what its person allowed it to share, and posts what's happening as event cards (date, place, cost);
+  - your agent picks the event that fits your times and proposes it as a **plan** you answer with **I'm in** or **Not this time**;
+  - paid offers close to the interest (Rita's guitar lessons in a music room) show up as cards, without committing you to anything.
+- **You can talk in any room.** Write in a circle, a deal room or a private room, and the other agents reply for their people, only from what those people shared. If an agent doesn't know, it says it will pass the message on, rather than making something up.
+- **Private rooms:** "Message" next to anyone in a room's details opens a one-to-one room with that person's agent.
+- **Prices are set by sealed offers, in code.** Each agent sends its person's limit to **Open's matcher** and nothing else; agents never say amounts. If the limits overlap, the matcher sets the price at a random point in the middle of the overlap, so the price doesn't tell either side the other's limit. There are no rounds of haggling to read a limit from, and no AI model ever sees a limit.
+- **A privacy check on everything agents say.** Every message an agent sends to other agents is checked in code; one that mentions a private number or contact details is replaced with a withheld notice and logged.
+- **Checks per room:** room details list checks run in code on the room's record: price within your limit, your limit stayed private, nothing shared before your yes, based on what you confirmed, typed moves only.
+- **It hears every offer before choosing.** Agents are heard in random order, so being first doesn't help. When more than one offer fits, your agent shows what it compared and why it picked one (the format you asked for first, then price). The others are marked **Not picked**.
+- **Undo:** after **Approve** or **I'm in**, you have 8 seconds to undo before your agent tells anyone.
+- **Proposals are bound to what you asked for.** If you change the intent behind a proposal after it was agreed, it no longer stands; you can dismiss it and send your agent out again. A new version shows what changed since the last one.
+- **After a yes:** the others say yes for themselves, you're introduced by first name, and your agent sets a **check-in**: did it happen, and would you do it again? Your answer goes back to your agent.
+- **What your agent knows:** the profile panel splits what your agent shares in rooms from what it keeps to itself, shows how many of your picks it guessed, and lets you make it forget an intent.
+- **Activity log:** the profile panel lists everything your agent did in your name, including what it said and to whom. Each entry is hash-chained to the one before, so any later edit shows. It also says which model runs every agent; it's the same for everyone, so no one gets better deals by having a stronger agent.
+- **Steering:** "Change my limit" reopens the room at your new limit. The agents bargain again in the same chat. If they agree, the proposal becomes version N+1 and any earlier approval is cleared, so you always approve exact terms. If they don't, the previous version still stands.
+- **Layout:**
+  - the list shows unread counts, typing indicators, version and price badges, and toasts when a proposal arrives;
+  - on a phone, the list and the chat are separate screens, and the browser Back button works between them;
+  - details (your profile, a room's members and terms) open in a drawer, and become a third column on wide screens.
 
 ## Run it
 
@@ -17,14 +56,55 @@ export ANTHROPIC_API_KEY=...   # then restart npm run dev
 
 `OPEN_AGENT_MODE=claude|demo` forces a mode. `OPEN_PACE=0.3` speeds up the live negotiation (0 turns pauses off).
 
+## On Cloudflare
+
+Live at **https://open.viral-trends.workers.dev**, on the same Cloudflare account as the other projects. It runs in demo mode until a Claude key is set (below).
+
+```
+browser ──▶ Worker "open" (worker/index.ts)
+             ├─ /*      static UI (Next.js static export in out/, served by Workers Static Assets)
+             └─ /api/*  session cookie ──▶ PersonAgent  (Durable Object, Agents SDK; one per person)
+                                              │  private state in its own SQLite: limits, chat, run, log
+                                              │  check-in alarms via this.schedule()
+                                              ├─ RPC ──▶ MarketAgent (Durable Object; one per community)
+                                              │            the only place sealed limits are compared
+                                              ├─ BROWSER ─▶ Cloudflare Browser Run (read-only page reader)
+                                              └─ fetch ──▶ Claude, directly or through AI Gateway
+```
+
+```bash
+npm run dev:cf         # build the UI, then run the Worker and Durable Objects locally (wrangler dev)
+npm run deploy         # build the UI and deploy to Cloudflare
+```
+
+To turn on Claude, either set a key on the Worker:
+
+```bash
+npx wrangler secret put ANTHROPIC_API_KEY
+```
+
+or, so the Worker holds no key at all, store the Anthropic key in an AI Gateway (dashboard → AI → AI Gateway → create `open` → Provider keys) and set these Worker variables: `OPEN_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<account id>/open/anthropic` and `OPEN_AI_GATEWAY_BYOK=true` (plus the secret `CF_AIG_TOKEN` if the gateway requires authentication). Every call is then logged, retried and tagged with its role (`cf-aig-metadata`), never with anything about the person.
+
+The same API code runs in both places: `src/server/api.ts` takes a standard `Request` and a host. Locally the host is a registry in the Next.js process (`src/server/local/`); on Cloudflare it's the person's Durable Object (`worker/person.ts`).
+
 ## How it works
 
 | Piece | Where | What it does |
 | --- | --- | --- |
 | Setup conversation | `src/server/intake/` | Claude (`claude-opus-5-5`) interviews the person and acts through tools: `show_choices` and `ask_number` render tappable options and sliders in the chat, `save_intent` records each intent as **stated** or **inferred** (inferred ones wait for the person to confirm), and `mark_ready` unlocks sending the agent out. Replies stream token by token. |
-| Negotiation | `src/server/negotiation/` | A deterministic engine finds matching members, checks times and price units, opens a group **room** when a group rate makes a deal possible, and runs concession bargaining in which each agent only knows its own limit. Claude then writes each message and a one-line **why** for the person. It never decides amounts, so your agent can't cross your limit. |
-| Other members | `src/server/population.ts` | A made-up Lisbon pilot (Diego the Spanish tutor, Lena, Joana, Marco who wants a bike, and others). Swap in real members once the intake collects them. |
-| Sessions | `.data/sessions/` | One JSON file per person, keyed by an httpOnly cookie. Gitignored: it holds real answers. |
+| Negotiation | `src/server/negotiation/` | A deterministic engine finds matching members, checks times and price units, opens a group **room** when a group rate makes a deal possible, and settles price by **sealed offers**: each agent sends its person's limit to Open's matcher, which picks a random point inside the overlap. Claude only writes the words. `renegotiate.ts` (`POST /api/rooms/[id]/renegotiate`) re-runs one room at a new limit and issues the next proposal version. |
+| Market | `src/server/market.ts`, `worker/market.ts` | Matching runs behind a `Market` interface. It returns plans with every other member's limit removed, so a person's agent never holds anyone else's number. On Cloudflare it's its own Durable Object per community. |
+| Models | `src/server/roles.ts`, `src/server/models.ts` | Which model does which job. Everything that speaks or decides for a person (setup, replies in rooms) runs on Claude Opus 5.5 at the same effort for every member; the narrator, which only words what code already decided, runs on Haiku 5.5; the page reader on Sonnet 5.5. |
+| Page reader | `src/server/tools/reader.ts`, `worker/browser.ts` | The agent's one outside tool: it reads a public page the person shared (a listing, an event). Read-only and logged out, https and public hosts only (checked again after redirects), a daily budget, and a model with no tools turns the page into fixed fields so instructions hidden in a page go nowhere. On Cloudflare the page is rendered by Browser Run; locally, a plain fetch. |
+| Circles | `src/server/rooms/circle.ts` | Finds members who share an interest at times that suit you, scripts what their agents share, attaches what's happening, and turns the event that fits your times into a plan. |
+| Talking in rooms | `src/server/rooms/reply.ts` | `POST /api/rooms/[id]/messages` adds your message and the other agents' replies. With Claude, it plays each agent, limited to its person's shared facts; without it, a keyword match does the same job. `POST /api/rooms/private` opens a one-to-one room with an agent you've met. |
+| Other members | `src/server/population.ts` | A made-up Lisbon pilot: Diego the Spanish tutor, Lena, Joana, Marco who wants a bike, music people (Lena, Rita, Bruno, Carla), runners (Tom, Sofia), Pedro's game nights, and what each is happy to share. Swap in real members once the intake collects them. |
+| Your agent | `src/server/actor.ts`, `worker/person.ts` | One live agent per person: every request for the same person shares one state (so a decision made while a run streams isn't overwritten) and every event goes through the activity log (`activity.ts`). On Cloudflare it's a Durable Object built on the Agents SDK, which wakes itself for check-ins; locally, `src/server/local/registry.ts` keeps it in memory and saves it to a file. |
+| Matcher and privacy | `src/server/negotiation/plan.ts`, `src/server/guard.ts`, `src/server/audit.ts` | `settle()` runs sealed offers; `guard()` checks every outgoing agent message; `checksFor()` runs the per-room checks. |
+| Checking its guesses | `src/server/intake/calibration.ts` | Builds either/or picks from members' shared facts (never prices), predicts the person's choice, scores it and keeps the misses as evidence. |
+| Live runs | `GET /api/agent/events` | Server-sent events for a run in progress. A page reopened while the agent is out replays what it missed and follows live (`Last-Event-ID` supported). |
+| Follow-through | `src/server/followup.ts` | `POST /api/opportunities/[id]` streams the others' yes and the introduction, and schedules the check-in; on Cloudflare a Durable Object alarm wakes the agent then to ask. `POST /api/opportunities/[id]/checkin` records how it went and tells your agent. |
+| Sessions | `.data/sessions/` locally, the person's Durable Object on Cloudflare | Keyed by an httpOnly cookie. `.data/` is gitignored: it holds real answers. |
 
 The browser only ever sees its own session: no model history and no other member's limits.
 
@@ -35,8 +115,32 @@ npm run lint
 npm run build
 ```
 
+## Setup
+
+- `npm run check` runs typecheck (app and Worker), lint and tests; CI (`.github/workflows/ci.yml`) runs it plus both builds and a Wrangler dry run on every push, in demo mode.
+- Settings are validated at startup (`src/server/env.ts`, `src/instrumentation.ts`): a bad `OPEN_PACE` or `OPEN_AGENT_MODE` stops the server with a clear message.
+- `src/server/api.ts` refuses state-changing API requests from other sites, in both hosts. Routes that reach other agents or the model are rate-limited per person.
+- Sessions are written to a temporary file and renamed into place, so a crash never leaves a half-written file.
+
+## Why it works this way
+
+These choices follow field studies of agent-to-agent marketplaces (Anthropic's Project Deal and Project Swap, Microsoft's Magentic Marketplace and others):
+
+- most lost value came from agents misunderstanding their person, hence the either/or questions, the recap and the checked guesses (Project Swap);
+- models leak their person's limit in a share of negotiations however they're prompted, and limits can be inferred from how offers move, hence sealed offers priced in code and a privacy check in code (SovereignNegotiation-Bench, 2026);
+- centralised matching beat free negotiation between agents by a wide margin, hence the matcher (Project Swap; LLM delegates in matching markets, 2026);
+- many agent agreements broke a duty to the person while still counting as deals, hence checks per room rather than a deal count;
+- agents tend to take the first offer they see, hence random order and comparing before choosing;
+- people with weaker agents got worse deals without noticing, hence one model and effort for every role that speaks for a person, never routed by plan or load (Project Deal);
+- agents favour the first proposal they see and fall for manipulation, hence sealed rounds, a market object that alone sees limits, and page content treated as data, never instructions (Magentic Marketplace);
+- agreed deals went undelivered when nothing tracked them, hence the check-in;
+- people asked to see what their agent did, hence the activity log.
+
 ## Not built yet
 
-- Real accounts, email and a database. Sessions live on local disk, so this runs locally or on a single server, not on serverless hosting.
-- The other members are simulated. Their agents follow the same bargaining rules, but nobody real approves their side.
+- Real accounts and email. A session is a cookie; losing it loses the agent.
+- Check-ins are asked in the app when the alarm fires, but nothing tells the person to come back yet: that needs email or Web Push from the Durable Object.
+- The other members are simulated. Real people don't enter the market yet, because their side of a deal would need their own approval (a room-level approval workflow that waits for each member).
+- An interactive browser (clicking, filtering) for the agent. Only reading is built; anything that acts on a page would need the person's approval first.
+- AI Gateway isn't created yet: Wrangler can't create one, so it's a dashboard step (above).
 - Shareable seat links, the organizer view, and the Mixer report from the designs.

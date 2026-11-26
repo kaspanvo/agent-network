@@ -6,7 +6,7 @@ import type { IntakeEvent } from "./types";
 
 async function turn(text: string, session = createSession("Sam")) {
   const events: IntakeEvent[] = [];
-  await demoIntakeAgent().respond(session, text, (e) => events.push(e));
+  await demoIntakeAgent().respond(session, text, (e) => events.push(e), new AbortController().signal);
   return { session, events };
 }
 

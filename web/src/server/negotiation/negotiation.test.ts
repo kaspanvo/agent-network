@@ -3,39 +3,49 @@ import type { ProfileIntent } from "../domain";
 import { LISBON_PILOT } from "../population";
 import { createSession } from "../store";
 import { scriptedNarrator } from "./narrator";
-import { bargain, planThreads } from "./plan";
+import { planThreads, settle } from "./plan";
 import { runAgent } from "./run";
 import type { AgentEvent } from "./types";
 
 const spanish: ProfileIntent = { id: "s1", direction: "seek", tag: "spanish-lessons", summary: "Learn Spanish", price: 15, unit: "hour", conditions: ["evenings"], provenance: "stated", evidence: "", status: "confirmed" };
 const bike: ProfileIntent = { id: "b1", direction: "offer", tag: "road-bike", summary: "Sell my road bike", price: 220, unit: "one-off", conditions: [], provenance: "inferred", evidence: "", status: "confirmed" };
 
-describe("bargain", () => {
+describe("sealed offers", () => {
   it.each([
     [15, 12],
     [250, 220],
     [100, 100],
-  ])("settles within both limits (buyer max %d, seller floor %d)", (max, floor) => {
-    for (const first of ["buyer", "seller"] as const) {
-      const { price, moves } = bargain(max, floor, first, "buyer");
+  ])("settles inside both limits (buyer max %d, seller floor %d), priced by the matcher", (max, floor) => {
+    for (const seed of ["a", "b", "c", "d"]) {
+      const { price, moves } = settle(max, floor, seed, "buyer");
       expect(price).not.toBeNull();
       expect(price!).toBeGreaterThanOrEqual(floor);
       expect(price!).toBeLessThanOrEqual(max);
-      expect(moves.at(-1)!.action).toBe("ACCEPT");
+      expect(moves.map((m) => [m.from, m.action])).toEqual([
+        ["you", "SEAL"],
+        ["them", "SEAL"],
+        ["open", "MATCH"],
+      ]);
     }
   });
 
-  it("walks away when the limits don't overlap", () => {
-    const { price, moves } = bargain(10, 20, "buyer", "buyer");
+  it("finds no deal when the limits don't overlap, without revealing either", () => {
+    const { price, moves } = settle(10, 20, "x", "buyer");
     expect(price).toBeNull();
-    expect(moves.at(-1)).toMatchObject({ from: "you", action: "DECLINE" });
+    expect(moves.at(-1)).toEqual({ from: "open", action: "NO_MATCH", amount: null });
   });
 
-  it("never offers past an agent's own limit", () => {
-    const { moves } = bargain(15, 12, "buyer", "buyer");
-    for (const m of moves.filter((m) => m.action !== "ACCEPT" && m.action !== "DECLINE")) {
-      if (m.from === "you") expect(m.amount!).toBeLessThanOrEqual(15);
-      else expect(m.amount!).toBeGreaterThanOrEqual(12);
+  it("never puts an amount in an agent's move, only in the matcher's", () => {
+    const { moves } = settle(250, 220, "x", "seller");
+    for (const m of moves.filter((m) => m.from !== "open")) expect(m.amount).toBeNull();
+  });
+
+  it("lands in the middle of the overlap, at a point that varies by room", () => {
+    const prices = new Set(["a", "b", "c", "d", "e", "f"].map((seed) => settle(300, 200, seed, "buyer").price));
+    expect(prices.size).toBeGreaterThan(1);
+    for (const p of prices) {
+      expect(p!).toBeGreaterThanOrEqual(235);
+      expect(p!).toBeLessThanOrEqual(265);
     }
   });
 });
@@ -77,7 +87,8 @@ describe("runAgent", () => {
     for (const m of messages.filter((m) => m.from === "you")) expect(m.text).not.toContain("€15/h limit");
 
     const titles = session.run!.opportunities.map((o) => o.title);
-    expect(titles).toEqual(["Learn Spanish with Diego, in a group of 3", "Sell my road bike: Marco would buy"]);
+    expect(titles[0]).toMatch(/^Learn Spanish with (Diego, in a group of 3|Lucía)$/);
+    expect(titles[1]).toBe("Sell my road bike: Marco would buy");
     expect(events.at(-1)).toMatchObject({ type: "done", stats: { ready: 2, rooms: 1 } });
   });
 });

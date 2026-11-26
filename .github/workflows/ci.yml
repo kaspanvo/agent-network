@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      # Demo mode: no Claude key in CI, and the agents' pauses switched off.
+      - run: npm run check
+        env:
+          OPEN_AGENT_MODE: demo
+          OPEN_PACE: "0"
+      - run: npm run build
+      # The Cloudflare build: static UI plus the Worker bundle, checked without deploying.
+      - run: npm run build:cf
+      - run: npx wrangler deploy --dry-run --outdir dist

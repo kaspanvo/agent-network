@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "open",
+  "main": "worker/index.ts",
+  // Browser Run quick actions from the binding need 2026-03-24 or later.
+  "compatibility_date": "2026-08-31",
+  "compatibility_flags": ["nodejs_compat"],
+  // The UI is a static export of the Next.js app (npm run build:cf). Only /api/* runs the Worker.
+  "assets": {
+    "directory": "./out",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    "not_found_handling": "404-page"
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "PERSON_AGENT", "class_name": "PersonAgent" },
+      { "name": "MARKET", "class_name": "MarketAgent" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PersonAgent", "MarketAgent"] }],
+  // Cloudflare Browser Run, for the read-only page reader.
+  "browser": { "binding": "BROWSER" },
+  "vars": {
+    "OPEN_PACE": "1"
+  },
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "preview_urls": false
+}
