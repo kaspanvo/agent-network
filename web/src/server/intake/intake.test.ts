@@ -55,4 +55,50 @@ describe("demo intake agent", () => {
     expect(intents[1]!.evidence).toBe("My old road bike just sits in the hallway.");
     expect(third.find((e) => e.type === "widget")).toMatchObject({ widget: { kind: "number", intentId: intents[0]!.id } });
   });
+
+  const said = (events: IntakeEvent[]) => events.flatMap((e) => (e.type === "text" ? [e.delta] : [])).join("");
+  const replies = (events: IntakeEvent[]) => events.find((e): e is Extract<IntakeEvent, { type: "suggestions" }> => e.type === "suggestions")?.options ?? [];
+
+  it("follows up on what was picked, not with one line for everyone", async () => {
+    const { session } = await turn("[App note: start]");
+    const { events } = await turn("I picked: Pay less for something", session);
+    expect(said(events)).toContain("pay less for");
+    expect(said(events)).not.toContain("Good picks");
+    expect(replies(events)).toContain("A used camera, not new");
+
+    const { session: two } = await turn("[App note: start]");
+    const { events: both } = await turn("I picked: Learn something new, Earn on the side", two);
+    expect(said(both)).toBe("Tell me in your own words what you'd like to learn and what you could teach or do for others.");
+    expect(replies(both)).toEqual(["I'd love to learn Spanish", "I could teach Spanish"]);
+  });
+
+  it("understands each suggested reply the way it was meant", async () => {
+    const cases: [string, string, string][] = [
+      ["Pay less for something", "A used camera, not new", "used-camera seek"],
+      ["Sell or rent something", "My camera sits in a drawer", "used-camera offer"],
+      ["Earn on the side", "I could teach Spanish", "spanish-lessons offer"],
+      ["Earn on the side", "I can walk dogs on weekends", "dog-sitting offer"],
+      ["Find help for a project", "Someone to mind my dog on weekends", "dog-sitting seek"],
+      ["Pay less for something", "Cheaper Spanish lessons in a group", "spanish-lessons seek"],
+    ];
+    for (const [pick, reply, expected] of cases) {
+      const { session } = await turn("[App note: start]");
+      await turn(`I picked: ${pick}`, session);
+      await turn(reply, session);
+      expect(session.intents.map((i) => `${i.tag} ${i.direction}`)).toEqual([expected]);
+    }
+  });
+
+  it("takes 'in a group' as already answering group or one-to-one", async () => {
+    const { session } = await turn("[App note: start]");
+    await turn("I picked: Pay less for something", session);
+    await turn("Cheaper Spanish lessons in a group", session);
+    expect(session.intents[0]!.prefers).toBe("group");
+  });
+
+  it("treats typing instead of picking at the start as the person's own words", async () => {
+    const { session } = await turn("[App note: start]");
+    await turn("I'd love to learn Spanish", session);
+    expect(session.intents.map((i) => i.tag)).toEqual(["spanish-lessons"]);
+  });
 });

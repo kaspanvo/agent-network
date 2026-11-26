@@ -316,7 +316,9 @@ export function InboxApp() {
               Start
             </button>
           </form>
-          <p className="text-xs text-slate">Claude, Anthropic&apos;s AI, runs your agent. You see and approve everything it notes and agrees.</p>
+          <p className="text-xs text-slate">
+            {mode === "claude" ? "Claude, Anthropic's AI, runs your agent." : "This is the demo agent: a fixed script, no AI model."} You see and approve everything it notes and agrees.
+          </p>
           {intake.error && (
             <p role="alert" className="text-sm text-signal-ink">
               {intake.error}

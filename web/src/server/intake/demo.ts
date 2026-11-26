@@ -11,7 +11,13 @@ import { activityFor, type ChatItem, type IntakeAgent, type IntakeEvent, type Wi
 type Topic = { match: RegExp; tag: string; direction: "seek" | "offer"; summary: string; unit: "hour" | "one-off"; inferred: boolean };
 
 // A fixed script for running the app without a Claude key. It recognises a handful of deals and interests.
+// More specific wordings come first: only the first match for each tag is kept, so "a used camera" is a purchase, not a sale.
+const BUYING = /\b(buy|find|get|want|need|looking for|used|second-?hand|not new|cheaper|pay less)\b/i;
 const DEALS: Topic[] = [
+  { match: /\b(teach|tutor)\w*\b[^.!?]*\bspanish\b/i, tag: "spanish-lessons", direction: "offer", summary: "Teach Spanish", unit: "hour", inferred: false },
+  { match: /\bwalk(ing)? dogs\b|\b(mind|sit|look after)\w*\b[^.!?]*\b(other people's|people's|others') dogs\b/i, tag: "dog-sitting", direction: "offer", summary: "Look after other people's dogs", unit: "one-off", inferred: false },
+  { match: new RegExp(`${BUYING.source}[^.!?]*\\bcamera\\b|\\bcamera\\b[^.!?]*${BUYING.source}`, "i"), tag: "used-camera", direction: "seek", summary: "Buy a used camera", unit: "one-off", inferred: false },
+  { match: new RegExp(`${BUYING.source}[^.!?]*\\bbike\\b|\\bbike\\b[^.!?]*${BUYING.source}`, "i"), tag: "road-bike", direction: "seek", summary: "Buy a used road bike", unit: "one-off", inferred: false },
   { match: /spanish/i, tag: "spanish-lessons", direction: "seek", summary: "Learn Spanish", unit: "hour", inferred: false },
   { match: /guitar lesson|learn (the )?guitar/i, tag: "guitar-lessons", direction: "seek", summary: "Learn the guitar", unit: "hour", inferred: false },
   { match: /cook/i, tag: "cooking-lessons", direction: "seek", summary: "Learn to cook Portuguese food", unit: "hour", inferred: false },
@@ -37,6 +43,40 @@ export const WHY_PROMPT = "What made you pick it";
 const GROUP = "A small group, if it's cheaper";
 const SOLO = "One-to-one, even if it costs more";
 const SKIP = /^(send my agent out|add something else)$/i;
+export const OPENING_PROMPT = "Pick any";
+const SPLITS_COST = /\b(group|together|split|share)\b/i;
+
+// What to ask next for each opening pick: a question on its own, the same thing as a clause when several were picked,
+// and replies the person might send that the script understands and the network can match.
+const FOLLOW_UP: Record<string, { ask: string; clause: string; replies: string[] }> = {
+  "Learn something new": { ask: "What would you like to learn?", clause: "what you'd like to learn", replies: ["I'd love to learn Spanish", "Guitar, from scratch"] },
+  "Earn on the side": { ask: "What could you teach, or do for other people?", clause: "what you could teach or do for others", replies: ["I could teach Spanish", "I can walk dogs on weekends"] },
+  "Sell or rent something": { ask: "What do you have that you'd sell or rent out?", clause: "what you'd sell or rent out", replies: ["My old bike just sits there", "My camera sits in a drawer"] },
+  "Pay less for something": {
+    ask: "What would you like to pay less for? I can look for someone selling one used, or a small group that splits the cost.",
+    clause: "what you'd like to pay less for",
+    replies: ["A used camera, not new", "Cheaper Spanish lessons in a group"],
+  },
+  "Meet people who share an interest": { ask: "What are you into?", clause: "what you're into", replies: ["I'm into jazz and live music", "I'd like people to run with"] },
+  "Find things to do (music, sport, games)": { ask: "What do you like doing: music, sport or games?", clause: "what you like doing", replies: ["Jazz and fado nights", "Board games, any night"] },
+  "Find help for a project": { ask: "What's the project, and what help would you need?", clause: "what help your project needs", replies: ["Someone to mind my dog on weekends", "Help taking better photos"] },
+};
+
+function listed(parts: string[], last: "and" | "or"): string {
+  return parts.length < 2 ? (parts[0] ?? "") : `${parts.slice(0, -1).join(", ")} ${last} ${parts.at(-1)}`;
+}
+
+// The reply to the opening picks follows what was picked, instead of one line for everyone.
+function followUp(picked: string[]): { text: string; replies: string[] } {
+  const known = picked.filter((p) => p in FOLLOW_UP).map((p) => FOLLOW_UP[p]!);
+  if (known.length === 0) return { text: "In your own words, what do you have in mind?", replies: ["I'm into jazz and live music", "I'd love to learn Spanish"] };
+  const replies = [...new Set(known.flatMap((f) => f.replies))];
+  const pickedReplies = known.length === 1 ? replies.slice(0, 2) : known.slice(0, 3).map((f) => f.replies[0]!);
+  if (known.length === 1) return { text: known[0]!.ask, replies: pickedReplies };
+  const clauses = known.map((f) => f.clause);
+  const text = known.length <= 3 ? `Tell me in your own words ${listed(clauses, "and")}.` : `Start with whichever matters most: ${listed(clauses, "or")}.`;
+  return { text, replies: pickedReplies };
+}
 
 function sentenceWith(text: string, match: RegExp): string {
   return text.split(/(?<=[.!?])\s+/).find((s) => match.test(s))?.trim() ?? text.trim();
@@ -109,17 +149,19 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
       }
       if (turn === 0) {
         await say(`Hi ${session.name}. I'm your agent. Tell me what you'd be open to, and I'll look for the people who fit while you get on with your day. What sounds like you?`);
-        show({ kind: "choices", prompt: "Pick any", options: OPENING_CHOICES, multiple: true });
+        show({ kind: "choices", prompt: OPENING_PROMPT, options: OPENING_CHOICES, multiple: true });
         return;
       }
-      if (turn === 1) {
-        await say("Good picks. In your own words, what do you have in mind? Something to learn, to sell, to find, or just something you enjoy doing with other people.");
-        suggest(["I'm into jazz and live music", "I'd love to learn Spanish", "My old bike just sits there"]);
+      const picks = /^I picked:\s*/i.test(userText) && previous?.widget?.kind === "choices" && previous.widget.prompt === OPENING_PROMPT;
+      if (picks) {
+        const { text, replies } = followUp(userText.replace(/^I picked:\s*/i, "").split(", "));
+        await say(text);
+        suggest(replies);
         return;
       }
 
-      // What the person just answered decides what happens next.
-      const answered = previous?.widget;
+      // What the person just answered decides what happens next. Typing instead of picking at the start counts as their own words.
+      const answered = previous?.widget?.kind === "choices" && previous.widget.prompt === OPENING_PROMPT ? undefined : previous?.widget;
       const asked = (prompt: string) => session.chat.some((c) => c.widget?.kind === "choices" && c.widget.prompt === prompt);
       let opening = "";
       if (answered?.kind === "choices" && answered.prompt === TIMES_PROMPT) {
@@ -172,7 +214,7 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
         suggest(["I'm into running", "Board games, any night", "My camera sits in a drawer"]);
         return;
       } else if ((!answered || answered.kind === "recap") && !SKIP.test(userText.trim())) {
-        const deals = DEALS.filter((t) => t.match.test(userText));
+        const deals = DEALS.filter((t) => t.match.test(userText)).filter((t, n, all) => all.findIndex((x) => x.tag === t.tag) === n);
         const saved: ProfileIntent[] = [];
         for (const [tag, match] of Object.entries(INTEREST_TAGS)) {
           if (!match.test(userText)) continue;
@@ -189,6 +231,8 @@ export function demoIntakeAgent(reader?: Reader): IntakeAgent {
               evidence: sentenceWith(userText, topic.match),
               unit: topic.unit,
               price: null,
+              // "Cheaper lessons in a group" already answers group or one-to-one.
+              ...(topic.direction === "seek" && topic.unit === "hour" && SPLITS_COST.test(sentenceWith(userText, topic.match)) ? { prefers: "group" as const } : {}),
             }),
           );
         }
