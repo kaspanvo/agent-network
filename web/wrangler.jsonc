@@ -41,7 +41,9 @@
     "OPEN_PACE": "1",
     // The Supabase project for accounts (public; shared with agentscrew, US East). Accounts switch on once
     // OPEN_SUPABASE_PUBLISHABLE_KEY is also set, as a Worker secret: npx wrangler secret put OPEN_SUPABASE_PUBLISHABLE_KEY
-    "OPEN_SUPABASE_URL": "https://orfyzlnodjvimlghdbsn.supabase.co"
+    "OPEN_SUPABASE_URL": "https://orfyzlnodjvimlghdbsn.supabase.co",
+    // That project's "Email OTP length" setting: its emailed codes have 8 digits.
+    "OPEN_SUPABASE_CODE_LENGTH": "8"
   },
   "observability": { "enabled": true },
   "workers_dev": true,

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { accounts, link } from "@/lib/account";
+import { accounts, justSignedIn, link } from "@/lib/account";
 import { api, ApiError } from "@/lib/client";
 import { AccountSection } from "../account/AccountSection";
 import { SignIn } from "../account/SignIn";
@@ -124,7 +124,18 @@ export function InboxApp() {
         if (err instanceof ApiError && err.needs === "signin") setGate(true);
         else intake.setError(err.message);
       })
-      .finally(() => setLoaded(true));
+      .finally(() => {
+        setLoaded(true);
+        // Back from Google or an emailed link: save this device's agent to the account, open the saved one, or ask.
+        if (!justSignedIn()) return;
+        link()
+          .then((status) => {
+            if (status === "conflict") setConflict(true);
+            else if (status === "none") setGate(false);
+            else window.location.reload();
+          })
+          .catch((err: Error) => intake.setError(err.message));
+      });
     return () => window.removeEventListener("popstate", onPop);
     // Load once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps

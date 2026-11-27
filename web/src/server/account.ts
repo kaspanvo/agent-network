@@ -1,15 +1,17 @@
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
 import { env } from "./env";
 
-// Accounts. People try Open anonymously; an account (Supabase Auth: an emailed code, then a passkey) saves their agent
-// so it survives a lost cookie, works on their other devices, and can be trusted with more (a standing yes, later
-// introductions and payments). Open never sees passwords or passkeys: the browser signs in with Supabase, and Open
-// checks the signed token Supabase issued, locally, against Supabase's published public keys.
+// Accounts. People try Open anonymously; an account (Supabase Auth: Google, an emailed link or code, then a passkey)
+// saves their agent so it survives a lost cookie, works on their other devices, and can be trusted with more (a
+// standing yes, later introductions and payments). Open never sees passwords or passkeys: the browser signs in with
+// Supabase, and Open checks the signed token Supabase issued, locally, against Supabase's published public keys.
 
-export type AccountConfig = { url: string; publishableKey: string };
+export type AccountConfig = { url: string; publishableKey: string; codeLength?: number };
 
 export function accountConfig(): AccountConfig | null {
-  return env.OPEN_SUPABASE_URL && env.OPEN_SUPABASE_PUBLISHABLE_KEY ? { url: env.OPEN_SUPABASE_URL.replace(/\/$/, ""), publishableKey: env.OPEN_SUPABASE_PUBLISHABLE_KEY } : null;
+  return env.OPEN_SUPABASE_URL && env.OPEN_SUPABASE_PUBLISHABLE_KEY
+    ? { url: env.OPEN_SUPABASE_URL.replace(/\/$/, ""), publishableKey: env.OPEN_SUPABASE_PUBLISHABLE_KEY, codeLength: env.OPEN_SUPABASE_CODE_LENGTH ?? 6 }
+    : null;
 }
 
 // Who's asking, as the verified token says. `freshAt` is when they last proved it's them (seconds since 1970).

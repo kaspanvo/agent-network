@@ -36,6 +36,8 @@ const Env = z.object({
   // with anonymous agents only, as before.
   OPEN_SUPABASE_URL: z.url().optional(),
   OPEN_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
+  // How many digits the emailed code has: the project's "Email OTP length" setting (Supabase's default is 6).
+  OPEN_SUPABASE_CODE_LENGTH: z.coerce.number().int().min(6).max(10).optional(),
 });
 export type Env = z.infer<typeof Env>;
 

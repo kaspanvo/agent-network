@@ -121,7 +121,7 @@ or, so the Worker holds no key at all, store the Anthropic key in an AI Gateway 
 
 ### Accounts (Supabase Auth)
 
-People try Open anonymously. Saving the agent to an account (an emailed 6-digit code, then a passkey) keeps it if the browser forgets them, opens it on their other devices, and is required before a standing yes. The browser signs in with Supabase; the Worker checks Supabase's signed access token locally against the project's published keys (`src/server/account.ts`, with `jose`), so no request waits on Supabase. Which agent an account owns lives in a small `AccountDirectory` Durable Object per account (`worker/accounts.ts`). A saved agent answers only its own account, and exporting, deleting, a standing yes, consent to share something sensitive, and who can reach the agent all need a sign-in from the last 10 minutes (passkey or code). Signing in on a device that already has an anonymous agent with a conversation asks which to keep. Saved agents are kept a year after the last visit; anonymous ones 30 days.
+People try Open anonymously. Saving the agent to an account (Google, or an email with a sign-in link and a code, then a passkey; one step for new and returning people, `src/components/account/SignIn.tsx`) keeps it if the browser forgets them, opens it on their other devices, and is required before a standing yes. The browser signs in with Supabase; the Worker checks Supabase's signed access token locally against the project's published keys (`src/server/account.ts`, with `jose`), so no request waits on Supabase. Which agent an account owns lives in a small `AccountDirectory` Durable Object per account (`worker/accounts.ts`). A saved agent answers only its own account, and exporting, deleting, a standing yes, consent to share something sensitive, and who can reach the agent all need a sign-in from the last 10 minutes (passkey or code). Signing in on a device that already has an anonymous agent with a conversation asks which to keep. Saved agents are kept a year after the last visit; anonymous ones 30 days.
 
 Off until both are set (unset, everything stays anonymous as before):
 
@@ -131,9 +131,10 @@ Dashboard steps in the Supabase project, before switching it on:
 
 1. **Region:** check it's an EU region (Project Settings → General). A project's region can't be changed. For now Open shares the agentscrew project (US East), so its sign-in list, email templates and rate limits are shared with agentscrew; give Open its own EU project before real EU members. Anything changed there must leave agentscrew working: keep the link in the email template, and don't switch on the CAPTCHA (agentscrew's sign-in doesn't send one).
 2. **Asymmetric signing keys:** Project Settings → JWT Keys → switch to the new signing keys, so the Worker can verify tokens from the JWKS endpoint.
-3. **Email:** Authentication → SMTP → a custom sender (the built-in one allows 2 emails an hour). Authentication → Email Templates → "Magic Link": include `{{ .Token }}` so people get a 6-digit code.
+3. **Email:** Authentication → SMTP → a custom sender (the built-in one allows 2 emails an hour). Authentication → Email Templates → "Magic Link": include `{{ .Token }}` next to `{{ .ConfirmationURL }}`, so the email has a code and a link. Set `OPEN_SUPABASE_CODE_LENGTH` to the project's Email OTP length (6 by default; 8 in the shared project).
+   - **Google:** Authentication → Sign In / Providers → Google, with your Google OAuth client. Until Open has its own client and a custom auth domain, Google's screen names the Supabase project's address rather than Open.
 4. **Passkeys:** Authentication → Sign In / Providers → enable Passkeys, with the relying party set to Open's permanent domain (changing it later breaks every passkey).
-5. **URLs:** Authentication → URL Configuration → add Open's domain (and `http://localhost:3000` for development).
+5. **URLs:** Authentication → URL Configuration → add `https://<Open's domain>/auth/callback` (and `http://localhost:3000/auth/callback` for development). Google and emailed links come back there.
 6. **Bot check:** Authentication → Attack Protection → CAPTCHA with Cloudflare Turnstile (Open's own Turnstile widget then needs to pass its token to `signInWithOtp`).
 7. Plan: the free plan pauses inactive projects after a week and lacks session time limits, so use Pro for real members.
 

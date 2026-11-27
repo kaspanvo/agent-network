@@ -1,7 +1,7 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeActor } from "./actor";
-import { isFresh, verifyToken, whoFrom, type Directory, type Who } from "./account";
+import { accountConfig, isFresh, verifyToken, whoFrom, type Directory, type Who } from "./account";
 import { handleAccount, type AccountHost, type AgentInfo } from "./accountRoutes";
 import { handleApi, type Host } from "./api";
 import { env } from "./env";
@@ -156,5 +156,14 @@ describe("linking this device's agent and the account's", () => {
     expect((await link({ ...host, who: null }))!.status).toBe(401);
     expect((await link({ ...host, config: null }))!.status).toBe(404);
     expect(await (await handleAccount(at("/api/account/config"), { ...host, config: null }))!.json()).toEqual({ enabled: false });
+  });
+
+  it("tells the browser how many digits the emailed code has", async () => {
+    env.OPEN_SUPABASE_URL = "https://proj.supabase.co";
+    env.OPEN_SUPABASE_PUBLISHABLE_KEY = "pk";
+    expect(accountConfig()?.codeLength).toBe(6);
+    env.OPEN_SUPABASE_CODE_LENGTH = 8;
+    expect(accountConfig()?.codeLength).toBe(8);
+    delete env.OPEN_SUPABASE_CODE_LENGTH;
   });
 });
