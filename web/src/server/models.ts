@@ -6,7 +6,7 @@ import { budgetedChat, budgetedPages, DAILY, limitBehind, localCounter, type Cou
 import { claudeNarrator, scriptedNarrator, type Narrator } from "./negotiation/narrator";
 import { agentMode, type AgentMode } from "./pace";
 import { AGENT_MODEL, claudeFor, OPEN_MODEL, workersAiChat, type AiBinding } from "./roles";
-import { claudeResponder, keywordResponder, openModelResponder, type Responder } from "./rooms/reply";
+import { claudeResponder, keywordResponder, oneAgentEach, openModelResponder, type Responder } from "./rooms/reply";
 import { claudeExtractor, fetchSource, makeReader, plainExtractor, type Extractor, type PageSource, type Reader } from "./tools/reader";
 
 export { AGENT_MODEL, OPEN_MODEL, ROLES, modelFor, claudeFor, type Role } from "./roles";
@@ -90,7 +90,7 @@ export function agentModels(pages: PageSource = fetchSource, ai?: AiBinding, cou
       reader,
       intake: () => intakeWithin(claudeIntakeAgent(claudeFor("intake", counter), reader), demo, counter),
       narrator: () => narratorOr(claudeNarrator(claudeFor("narrator", counter)), scriptedNarrator),
-      responder: () => responderOr(claudeResponder(claudeFor("room_reply", counter)), keywordResponder),
+      responder: () => oneAgentEach(responderOr(claudeResponder(claudeFor("room_reply", counter)), keywordResponder)),
       resting: async () => (await counter.used("claude_calls")) >= DAILY.claudeCalls,
     };
   }
@@ -105,7 +105,7 @@ export function agentModels(pages: PageSource = fetchSource, ai?: AiBinding, cou
       intake: () => openModelIntakeAgent(chat, demoIntakeAgent(reader), reader),
       // The narrator only words what code already decided; the script does that well enough.
       narrator: () => scriptedNarrator,
-      responder: () => openModelResponder(chat),
+      responder: () => oneAgentEach(openModelResponder(chat)),
       resting: async () => (await counter.used("neurons")) >= DAILY.neurons,
     };
   }

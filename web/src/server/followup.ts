@@ -114,7 +114,7 @@ export async function decide(
     threadId,
     opportunityId: id,
     stage: "introduced",
-    text: `${plan ? "Everyone's in" : `Everyone approved version ${opportunity.version}`}. You're introduced to ${listWords(others)} by first name in this room. Contact details are shared only if you both choose to.`,
+    text: `${plan ? "Everyone's in" : `Everyone approved version ${opportunity.version}`}. You're introduced to ${listWords(others)} by first name in this room. Contact details are shared only if you both choose to.${opportunity.open?.length ? ` Still to settle between you: ${opportunity.open.map((o) => o.charAt(0).toLowerCase() + o.slice(1)).join("; ")}.` : ""}`,
   });
   await pause(600);
   send({

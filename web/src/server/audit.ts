@@ -72,6 +72,23 @@ export function checksFor(session: Session, threadId: string): Check[] {
   if (ours.length && session.agentKey) {
     const all = ours.every((m) => !!m.signature);
     checks.push({ label: "Signed by your agent", ok: all, detail: all ? `Every message your agent sent here carries its signature (key ${session.agentKey.id}).` : "A message from your agent here has no signature." });
+    // Each signed message names the permission it was sent under, who it was for, and a counter that only goes up,
+    // so it can't be replayed elsewhere, later, or out of order.
+    const scoped = ours.filter((m) => m.envelope);
+    if (scoped.length) {
+      const tag = session.intents.find((i) => threadId.startsWith(`${i.id}-`))?.tag;
+      const permits = session.delegations ?? [];
+      const inScope = scoped.every((m) => {
+        const d = permits.find((p) => p.id === m.envelope!.scope);
+        return !!d && (!tag || d.tags.includes(tag)) && m.envelope!.at >= d.issuedAt && m.envelope!.at <= d.until;
+      });
+      const ordered = scoped.every((m, i) => i === 0 || m.envelope!.seq > scoped[i - 1]!.envelope!.seq);
+      checks.push({
+        label: "Within the permission you gave",
+        ok: inScope && ordered,
+        detail: inScope && ordered ? "Every message names the permission from the recap you confirmed, who it was for, and a counter, so it can't be replayed somewhere else." : "A message here falls outside the permission you gave, or is out of order.",
+      });
+    }
   }
 
   const freeform = messages.filter((m) => m.from !== "person" && !m.action).length;

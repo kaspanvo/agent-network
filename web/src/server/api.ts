@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { listen, observe, persist, record, type Actor } from "./actor";
+import { broadcast, listen, observe, persist, record, type Actor } from "./actor";
+import { signUnsigned } from "./identity";
+import { lookAgain, lookDue, startLooking } from "./lookagain";
 import { formatPrice } from "./domain";
 import { checkIn, decide } from "./followup";
 import { extendHold, scheduleHolds, sweepHolds, type Scheduler } from "./holds";
@@ -17,9 +19,11 @@ import { MAX_RENEGOTIATIONS, renegotiate, renegotiationsLeft } from "./negotiati
 import { releaseNext, runAgent } from "./negotiation/run";
 import type { AgentEvent } from "./negotiation/types";
 import { openPrivateRoom, sayInRoom } from "./rooms/reply";
+import { isClosed, tidyRooms } from "./rooms/settle";
 import { covers, makeMandate, mandateWords } from "./mandate";
 import { memberByName } from "./population";
 import { exportOf, forgetIntent, forgetNote, RETENTION_DAYS, touch } from "./privacy";
+import { answer, reachOf, unblock } from "./reach";
 import { SENSITIVE_WORDS } from "./sensitive";
 import { publicSession, SESSION_COOKIE } from "./store";
 import { clientIp, passesTurnstile, turnstileSiteKey } from "./turnstile";
@@ -97,7 +101,11 @@ const routes: Route[] = [
   { method: "PUT", pattern: /^\/api\/intents\/([^/]+)\/consent$/, handle: giveConsent },
   { method: "DELETE", pattern: /^\/api\/intents\/([^/]+)\/consent$/, handle: withdrawConsent },
   { method: "DELETE", pattern: /^\/api\/about\/([^/]+)$/, handle: forgetNoteRoute },
+  { method: "PUT", pattern: /^\/api\/reach$/, handle: setReach },
+  { method: "POST", pattern: /^\/api\/reach\/requests\/([^/]+)$/, handle: answerRequest },
+  { method: "DELETE", pattern: /^\/api\/reach\/blocked\/([^/]+)$/, handle: unblockRoute },
   { method: "POST", pattern: /^\/api\/agent\/run$/, handle: run },
+  { method: "PUT", pattern: /^\/api\/agent\/keep-looking$/, handle: keepLooking },
   { method: "GET", pattern: /^\/api\/agent\/events$/, handle: events },
   { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)$/, handle: decision },
   { method: "POST", pattern: /^\/api\/opportunities\/([^/]+)\/checkin$/, handle: checkin },
@@ -164,6 +172,12 @@ async function getSession(request: Request, host: Host) {
     const lapsed = sweepHolds(actor.session);
     for (const event of lapsed) observe(actor, event);
     changed ||= lapsed.length > 0;
+    changed = tidyRooms(actor) || changed;
+    // Without alarms (local development), a look that fell due runs on the next visit instead.
+    if (!host.wake && lookDue(actor.session)) {
+      await keepLookingNow(actor, host);
+      changed = true;
+    }
   }
   if (changed) persist(actor);
   // The cookie lasts as long as the agent is kept, counted from this visit.
@@ -225,6 +239,44 @@ function forgetNoteRoute(_request: Request, host: Host, [id]: string[]) {
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to come back.", 409);
   if (!forgetNote(actor.session, id!)) return jsonError("That's already gone.", 404);
   persist(actor);
+  return Response.json(publicSession(actor.session));
+}
+
+// Who can reach the person's agent: ask first (the default), or only agents Open matched them with.
+async function setReach(request: Request, host: Host) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const input = await body(request, z.object({ policy: z.enum(["ask", "matched"]) }));
+  if (!input) return jsonError("Choose who can reach your agent.", 400);
+  const reach = reachOf(actor.session);
+  if (reach.policy !== input.policy) {
+    reach.policy = input.policy;
+    record(actor, { kind: "you", by: "you", text: input.policy === "ask" ? "You let agents you haven't met ask before reaching you" : "You set your agent to hear only from agents Open matched you with" });
+    persist(actor);
+  }
+  return Response.json(publicSession(actor.session));
+}
+
+async function answerRequest(request: Request, host: Host, [id]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const input = await body(request, z.object({ answer: z.enum(["approve", "deny", "block"]) }));
+  if (!input) return jsonError("Approve, deny or block.", 400);
+  const answered = answer(actor.session, id!, input.answer);
+  if (!answered) return jsonError("That request was already answered.", 409);
+  const words = { approve: "let", deny: "turned away", block: "blocked" }[input.answer];
+  record(actor, { kind: "you", by: "you", text: `You ${words} ${answered.from.name}'s agent${input.answer === "approve" ? " reach yours" : ""}` });
+  persist(actor);
+  return Response.json(publicSession(actor.session));
+}
+
+function unblockRoute(_request: Request, host: Host, [agent]: string[]) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  if (unblock(actor.session, agent!)) {
+    record(actor, { kind: "you", by: "you", text: "You unblocked an agent" });
+    persist(actor);
+  }
   return Response.json(publicSession(actor.session));
 }
 
@@ -419,6 +471,51 @@ async function answerAndRelease(actor: Actor, host: Host, emit: (event: AgentEve
   }
 }
 
+// "Keep looking": the agent checks the network again every day for a while, and brings back only what's new.
+async function keepLooking(request: Request, host: Host) {
+  const actor = host.actor;
+  if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const input = await body(request, z.object({ days: z.union([z.literal(0), z.literal(7), z.literal(14), z.literal(30)]) }));
+  if (!input) return jsonError("Choose how long your agent keeps looking.", 400);
+  if (input.days && !actor.session.run) return jsonError("Send your agent out once first.", 409);
+  const k = startLooking(actor.session, input.days);
+  record(actor, { kind: "you", by: "you", text: k ? `You asked your agent to keep looking every day until ${new Date(k.until).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })}` : "You asked your agent to stop looking" });
+  if (k) host.wake?.({ kind: "look" }, new Date(k.next));
+  persist(actor);
+  return Response.json(publicSession(actor.session));
+}
+
+// One scheduled look, from a Durable Object alarm or a visit: new fits go into the run, a standing yes answers what
+// it covers, holds are set, and the next look is scheduled.
+export async function keepLookingNow(actor: Actor, host: Host): Promise<void> {
+  const { session } = actor;
+  if (actor.busy || !lookDue(session)) return;
+  const refused = spend(session, "runs");
+  const emit = (event: AgentEvent | { type: "error"; message: string }) => {
+    if (event.type !== "error") {
+      observe(actor, event);
+      broadcast(actor, event);
+    }
+  };
+  if (refused) {
+    session.keepLooking!.next = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    record(actor, { kind: "found", by: "agent", text: "Skipped today's look: today's searches are used up" });
+  } else {
+    actor.busy = "look";
+    try {
+      await lookAgain(session, agentsOf(host).narrator(), host.market ?? localMarket(), emit);
+      await answerAndRelease(actor, host, emit);
+      scheduleHolds(session, host.wake);
+    } finally {
+      actor.busy = null;
+    }
+  }
+  tidyRooms(actor);
+  await signUnsigned(session);
+  if (session.keepLooking && Date.parse(session.keepLooking.next) < Date.parse(session.keepLooking.until)) host.wake?.({ kind: "look" }, new Date(session.keepLooking.next));
+  persist(actor);
+}
+
 // A standing yes: the person lets their agent accept offers for one intent within bounds, until a date.
 async function setMandate(request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
@@ -494,6 +591,8 @@ async function run(request: Request, host: Host) {
   const who = (await agents.resting().catch(() => false)) || !agents.label ? "Every agent here follows the same simple script today" : `Every agent here speaks through ${agents.label}, the same for everyone`;
   session.decisions = {};
   session.followups = {};
+  // A new run brings new rooms; a room closed in the last one can open again.
+  session.closed = {};
   return ndjson<AgentEvent>(
     actor,
     async (emit) => {
@@ -614,6 +713,7 @@ async function message(request: Request, host: Host, [id]: string[]) {
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
   const limited = rateLimited(actor);
   if (limited) return limited;
+  if (isClosed(actor.session, id!)) return jsonError("This room is closed: it settled. Send your agent out again to find something new.", 409);
   const input = await body(request, z.object({ text: z.string().trim().min(1).max(500) }));
   if (!input) return jsonError("Write a message first.", 400);
   const over = quota(actor, "roomMessages");
@@ -630,6 +730,7 @@ async function renegotiateRoom(request: Request, host: Host, [id]: string[]) {
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to finish.", 409);
   const input = await body(request, z.object({ limit: z.number().finite().positive().max(100000) }));
   if (!input) return jsonError("Choose a new limit.", 400);
+  if (isClosed(actor.session, id!)) return jsonError("This room is closed: it settled. Send your agent out again to find something new.", 409);
   if (renegotiationsLeft(actor.session, id!) === 0) return jsonError(`You've changed your limit in this room ${MAX_RENEGOTIATIONS} times. It stays as it is now, so nobody can narrow down what the other side would accept.`, 409);
   const over = quota(actor, "renegotiations");
   if (over) return over;

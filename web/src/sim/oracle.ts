@@ -1,6 +1,6 @@
 import { cleared, sharedLine } from "../server/domain";
 import { publicSession, logIntact, type Session } from "../server/store";
-import { verify } from "../server/identity";
+import { checkMessage, verify } from "../server/identity";
 import type { AgentEvent } from "../server/negotiation/types";
 import { LISBON_PILOT, memberByName, memberName } from "../server/population";
 import type { Trace } from "./driver";
@@ -96,8 +96,23 @@ export async function checksFor(trace: Trace): Promise<Check[]> {
   const key = session.agentKey;
   const mine = all.filter((m) => m.from === "you" || m.from === "person");
   let bad = 0;
-  for (const m of mine) if (!key || !m.signature || !(await verify(key, m.threadId, m.text, m.signature))) bad++;
+  for (const m of mine) if (!key || !m.signature || !(await verify(key, m.threadId, m.text, m.signature, m.envelope))) bad++;
   add("signed", "Every message their agent sent is signed", bad === 0, bad ? `${bad} of ${mine.length} unsigned or invalid` : `${mine.length} signatures verified.`);
+  // A receiving agent accepts each message once, in order, from inside its permission, and refuses a replay.
+  const scoped = mine.filter((m) => m.envelope);
+  if (key && scoped.length) {
+    let last = 0;
+    const refused: string[] = [];
+    for (const m of scoped) {
+      const tag = session.intents.find((i) => m.threadId.startsWith(`${i.id}-`))?.tag;
+      const why = await checkMessage(key, m, { delegations: session.delegations ?? [], tag, lastSeq: last });
+      if (why) refused.push(`“${m.text.slice(0, 40)}”: ${why}`);
+      last = m.envelope!.seq;
+    }
+    const replay = await checkMessage(key, scoped[0]!, { delegations: session.delegations ?? [], lastSeq: scoped.at(-1)!.envelope!.seq });
+    const elsewhere = await checkMessage(key, { ...scoped[0]!, threadId: "another-room" }, { delegations: session.delegations ?? [] });
+    add("replay-proof", "Messages can't be replayed or moved to another room", !refused.length && replay !== null && elsewhere !== null, refused.join("; ") || `${scoped.length} accepted in order; a replay was refused (${replay}); moved to another room it was refused (${elsewhere}).`);
+  }
 
   // 9. Every AI-written message is marked as AI for software too.
   const unmarked = (publicSession(session).run?.events ?? []).filter((e) => e.type === "message" && (e.from === "you" || e.from === "them") && !(e as { aiGenerated?: boolean }).aiGenerated);

@@ -17,12 +17,12 @@ import { Sidebar, type ConversationSummary } from "./Sidebar";
 const AGENT = "agent";
 const UNDO_MS = 8000;
 
-type Trust = Pick<PublicSession, "log" | "logIntact" | "checks" | "disclosures" | "understanding" | "stale">;
-const NO_TRUST: Trust = { log: [], logIntact: true, checks: {}, disclosures: {}, understanding: null, stale: [] };
+type Trust = Pick<PublicSession, "log" | "logIntact" | "checks" | "disclosures" | "understanding" | "stale" | "closed" | "reach" | "keepLooking">;
+const NO_TRUST: Trust = { log: [], logIntact: true, checks: {}, disclosures: {}, understanding: null, stale: [], closed: {}, reach: { policy: "ask", requests: [], blocked: [], allowed: [] }, keepLooking: null };
 type Pending = { id: string; decision: "approved" | "declined"; until: number };
 
 function trustOf(session: PublicSession): Trust {
-  return { log: session.log, logIntact: session.logIntact, checks: session.checks, disclosures: session.disclosures, understanding: session.understanding, stale: session.stale };
+  return { log: session.log, logIntact: session.logIntact, checks: session.checks, disclosures: session.disclosures, understanding: session.understanding, stale: session.stale, closed: session.closed, reach: session.reach, keepLooking: session.keepLooking };
 }
 
 function readWhy(): boolean {
@@ -250,6 +250,10 @@ export function InboxApp() {
       void privately(() => api.forgetNote(id));
     },
     onConsent: (id: string, share: boolean) => void privately(() => api.consent(id, share)),
+    reach: trust.reach,
+    onReach: (policy: "ask" | "matched") => void privately(() => api.setReach(policy)),
+    onAnswer: (id: string, answer: "approve" | "deny" | "block") => void privately(() => api.answerRequest(id, answer)),
+    onUnblock: (agent: string) => void privately(() => api.unblock(agent)),
   };
 
   const openPrivate = async (person: string) => {
@@ -276,7 +280,8 @@ export function InboxApp() {
       badge: out ? { text: "LIVE", tone: "live" } : pendingIntents ? { text: "CONFIRM", tone: "signal" } : intake.ready && run.threads.length === 0 ? { text: "READY", tone: "good" } : null,
       unread: current === AGENT ? 0 : Math.max(0, countFor(AGENT) - (seen[AGENT] ?? 0)),
       typing: false,
-      needs: intake.busy || out ? null : lastAgent?.widget && !lastAgent.answered ? "Answer" : pendingIntents ? "Confirm" : null,
+      needs: intake.busy || out ? null : lastAgent?.widget && !lastAgent.answered ? "Answer" : pendingIntents ? "Confirm" : trust.reach.requests.length ? "Review" : null,
+      section: "needs",
     };
     const rooms: ConversationSummary[] = run.threads.map((t) => {
       const offer = run.opportunities.find((o) => o.threadId === t.id);
@@ -301,6 +306,14 @@ export function InboxApp() {
               ? `You're in · ${offer.title}`
               : "You passed this time"
           : null;
+      const needs =
+        offer && !decision && pendingDecision?.id !== offer.id && !trust.stale.includes(offer.id)
+          ? price
+            ? "Approve"
+            : "Answer"
+          : followup.checkInDue
+            ? "Check in"
+            : null;
       return {
         id: t.id,
         kind: "room",
@@ -333,14 +346,9 @@ export function InboxApp() {
                       : null,
         unread: current === t.id ? 0 : Math.max(0, t.timeline.length - (seen[t.id] ?? 0)),
         typing: isLive(t),
-        needs:
-          offer && !decision && pendingDecision?.id !== offer.id && !trust.stale.includes(offer.id)
-            ? price
-              ? "Approve"
-              : "Answer"
-            : followup.checkInDue
-              ? "Check in"
-              : null,
+        needs,
+        // Done: nothing more can happen here (closed, no fit, passed over). Waiting: it's with the other side or the calendar.
+        section: needs ? "needs" : trust.closed[t.id] || t.status === "no_fit" || decision === "declined" || decision === "lapsed" || followup.done || (!out && notPicked(t, run.opportunities)) ? "done" : "waiting",
       };
     });
     return [agent, ...rooms];
@@ -445,6 +453,7 @@ export function InboxApp() {
               pending={pending && offer && pending.id === offer.id ? pending : null}
               onUndo={() => setPending(null)}
               stale={offer ? trust.stale.includes(offer.id) : false}
+              closed={trust.closed[thread.id] ?? null}
               onCheckIn={runs.checkIn}
               onExtend={runs.extend}
               onRenegotiate={(limit) => renegotiate(thread.id, limit)}
@@ -515,6 +524,8 @@ export function InboxApp() {
                   running={out}
                   onDecide={intake.decideIntent}
                   privacy={privacy}
+                  keepLooking={trust.keepLooking}
+                  onKeepLooking={(days) => void privately(() => api.keepLooking(days))}
                   onSendOut={() => void sendOut()}
                   sentOut={sentOut}
                   mode={mode}

@@ -89,7 +89,10 @@ describe("holds: a proposal keeps everyone's place for a while, then lapses", ()
     const host = hostFor(session);
     const body = await (await handleApi(new Request("http://localhost:3000/api/session"), host)).json();
     expect(body.session.decisions[id]).toBe("lapsed");
-    expect(session.log.at(-1)).toMatchObject({ kind: "hold", by: "open" });
+    expect(session.log.at(-2)).toMatchObject({ kind: "hold", by: "open" });
+    // A lapsed proposal settles its room: it closes, and the log says when it's deleted.
+    expect(session.log.at(-1)!.text).toMatch(/^Closed the room .* because the proposal lapsed/);
+    expect(body.session.closed[session.run!.opportunities[0]!.threadId]).toBeTruthy();
     expect(checksFor(session, session.run!.opportunities[0]!.threadId).find((c) => c.label === "Nobody kept waiting")?.ok).toBe(true);
   });
 });

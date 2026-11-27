@@ -1,11 +1,12 @@
 import { Agent } from "agents";
 import { makeActor, observe, persist, broadcast, type Actor } from "../src/server/actor";
-import { handleApi } from "../src/server/api";
+import { handleApi, keepLookingNow, type Host } from "../src/server/api";
 import { checkInDue } from "../src/server/followup";
 import { lapse, type Wake } from "../src/server/holds";
 import type { Market } from "../src/server/market";
 import { agentModels } from "../src/server/models";
 import { expired, expiresAt } from "../src/server/privacy";
+import { receive, type Inbound } from "../src/server/reach";
 import { createSession, upgradeSession, type Session } from "../src/server/store";
 import { browserRunSource } from "./browser";
 import { budgetCounter } from "./budget";
@@ -53,6 +54,16 @@ export class PersonAgent extends Agent<Env> {
     await this.destroy();
   }
 
+  // A message from another person's agent, delivered Durable Object to Durable Object (never through the public API).
+  // It's checked and either delivered, held as a request for the person, or refused.
+  async receiveContact(inbound: Inbound) {
+    const actor = this.actor;
+    if (!actor) return { status: "refused", why: "no such agent" } as const;
+    const result = await receive(actor.session, inbound);
+    if (result.status !== "refused" || result.why !== "blocked") persist(actor);
+    return result;
+  }
+
   // Fires when the agent would be past its keep-until date. If the person came back meanwhile, it checks again later.
   async expire() {
     const actor = this.actor;
@@ -79,7 +90,12 @@ export class PersonAgent extends Agent<Env> {
 
   async onRequest(request: Request): Promise<Response> {
     if (this.actor) this.actor.lastUsed = Date.now();
-    return handleApi(request, {
+    return handleApi(request, this.host());
+  }
+
+  // What the shared API code needs from this object: the person's agent, the market, the models, the alarms.
+  private host(): Host {
+    return {
       actor: this.actor,
       start: (name) => {
         // A fresh object for a fresh person: the Worker routes every new session to a new id.
@@ -98,13 +114,14 @@ export class PersonAgent extends Agent<Env> {
       wake: (job, at) => {
         void this.schedule(at, "wake", job);
       },
-    });
+    };
   }
 
   // Alarms fire at least once, so each job is safe to run twice: it re-checks the session and does nothing if it's settled.
   async wake(job: Wake) {
     const actor = this.actor;
     if (!actor) return;
+    if (job.kind === "look") return keepLookingNow(actor, this.host());
     const event = job.kind === "hold" ? lapse(actor.session, job.opportunityId) : checkInDue(actor.session, job.opportunityId);
     if (!event) return;
     observe(actor, event);

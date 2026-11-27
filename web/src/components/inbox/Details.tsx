@@ -194,6 +194,38 @@ function ModelNote({ mode, model }: { mode: AgentMode | null; model: string | nu
   );
 }
 
+// After the first run: the agent checks again every day for a while and brings back only what's new.
+function KeepLooking({ state, onSet }: { state: { until: string; next: string; found: number } | null; onSet: (days: 0 | 7 | 14 | 30) => void }) {
+  const day = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return (
+    <section aria-label="Keep looking" className="flex flex-col gap-2 rounded-2xl bg-paper p-3.5 text-[13px]">
+      <h3 className="font-mono text-[11px] tracking-wider text-slate">KEEP LOOKING</h3>
+      {state ? (
+        <>
+          <p>
+            Your agent checks again every day until {day(state.until)} and brings back only new fits. Next look: {day(state.next)}.
+            {state.found > 0 && ` It has found ${state.found} new so far.`}
+          </p>
+          <button type="button" onClick={() => onSet(0)} className="min-h-9 self-start underline underline-offset-2">
+            Stop looking
+          </button>
+        </>
+      ) : (
+        <>
+          <p className="text-slate">New people join, and what you want can change. Your agent can check again every day and bring back only what&apos;s new.</p>
+          <div className="flex flex-wrap gap-2">
+            {([7, 14, 30] as const).map((d) => (
+              <button key={d} type="button" onClick={() => onSet(d)} className="min-h-9 rounded-full border border-line bg-white px-3 hover:border-ink">
+                For {d === 7 ? "a week" : d === 14 ? "two weeks" : "a month"}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function AgentDetails(props: {
   name: string;
   intents: ProfileIntent[];
@@ -201,6 +233,8 @@ export function AgentDetails(props: {
   about: AboutNote[];
   mandate: MandateControls;
   privacy: PrivacyControls;
+  keepLooking: { until: string; next: string; found: number } | null;
+  onKeepLooking: (days: 0 | 7 | 14 | 30) => void;
   ready: boolean;
   threads: Thread[];
   activeId: string | null;
@@ -240,6 +274,7 @@ export function AgentDetails(props: {
           )
         }
       />
+      {props.sentOut && <KeepLooking state={props.keepLooking} onSet={props.onKeepLooking} />}
       {props.threads.length > 0 && (
         <section aria-label="Your agent's network" className="flex flex-col gap-2 border-t border-line pt-4">
           <h3 className="font-mono text-[11px] tracking-wider text-slate">NETWORK</h3>

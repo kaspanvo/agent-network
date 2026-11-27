@@ -28,7 +28,75 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 export type MandateControls = { onSet: (id: string, price: number, days: number) => void; onDrop: (id: string) => void };
 
 // The person's rights over their profile: forget anything, and give or take back consent to share something sensitive.
-export type PrivacyControls = { onForget: (id: string) => void; onForgetNote: (id: string) => void; onConsent: (id: string, share: boolean) => void };
+export type ReachState = {
+  policy: "ask" | "matched";
+  requests: { id: string; from: { agent: string; name: string }; text: string; at: string }[];
+  blocked: { agent: string; name: string }[];
+};
+export type PrivacyControls = {
+  onForget: (id: string) => void;
+  onForgetNote: (id: string) => void;
+  onConsent: (id: string, share: boolean) => void;
+  reach?: ReachState;
+  onReach?: (policy: "ask" | "matched") => void;
+  onAnswer?: (id: string, answer: "approve" | "deny" | "block") => void;
+  onUnblock?: (agent: string) => void;
+};
+
+// Who can reach the agent: strangers waiting for an answer first, then the setting and anyone blocked.
+function Reach({ privacy }: { privacy: PrivacyControls }) {
+  const reach = privacy.reach;
+  if (!reach) return null;
+  return (
+    <Section title="WHO CAN REACH YOUR AGENT">
+      {reach.requests.map((r) => (
+        <div key={r.id} className="flex flex-col gap-2 rounded-xl border-[1.5px] border-dashed border-signal-light bg-[#fff7f3] p-3 text-[13px]">
+          <p>
+            <strong>{r.from.name}&apos;s agent</strong> hasn&apos;t met yours and wants to reach you:
+          </p>
+          <p className="rounded-lg bg-white px-2.5 py-1.5">&ldquo;{r.text}&rdquo;</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => privacy.onAnswer?.(r.id, "approve")} className="min-h-10 rounded-full bg-ink px-4 font-semibold text-white">
+              Let them reach me
+            </button>
+            <button type="button" onClick={() => privacy.onAnswer?.(r.id, "deny")} className="min-h-10 rounded-full border border-[#d5d9e1] bg-white px-4">
+              Not now
+            </button>
+            <button type="button" onClick={() => privacy.onAnswer?.(r.id, "block")} className="min-h-10 rounded-full px-3 text-signal-ink underline underline-offset-2">
+              Block
+            </button>
+          </div>
+        </div>
+      ))}
+      <fieldset className="flex flex-col gap-1 text-[13px]">
+        <legend className="sr-only">Who can reach your agent</legend>
+        {(
+          [
+            ["ask", "Agents Open matched me with, and others if I say yes"],
+            ["matched", "Only agents Open matched me with"],
+          ] as const
+        ).map(([value, label]) => (
+          <label key={value} className="flex min-h-9 items-center gap-2.5">
+            <input type="radio" name="reach" checked={reach.policy === value} onChange={() => privacy.onReach?.(value)} className="size-4 accent-ink" />
+            {label}
+          </label>
+        ))}
+      </fieldset>
+      {reach.blocked.length > 0 && (
+        <ul className="flex flex-col gap-1 text-[13px]">
+          {reach.blocked.map((b) => (
+            <li key={b.agent} className="flex items-center justify-between gap-2 rounded-lg border border-line px-2.5 py-1.5">
+              <span>{b.name}&apos;s agent · blocked</span>
+              <button type="button" onClick={() => privacy.onUnblock?.(b.agent)} className="min-h-8 text-slate underline underline-offset-2 hover:text-ink">
+                Unblock
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
 
 // Something sensitive (health, beliefs, sexuality...) found in an intent by code. It's never shared until the person
 // says so here, and they can take that back.
@@ -276,6 +344,8 @@ export function AgentPanel({
           )}
         </>
       )}
+
+      {privacy && <Reach privacy={privacy} />}
 
       <ul className="flex flex-col gap-1.5 border-t border-line pt-3.5 text-[13px] text-slate">
         <li>Limits and notes stay private to your agent</li>

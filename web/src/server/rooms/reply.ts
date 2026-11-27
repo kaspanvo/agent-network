@@ -28,6 +28,22 @@ function discoverOf(session: Session, threadId: string): Discover | undefined {
   return session.run?.events.find((e): e is Discover => e.type === "discover" && e.threadId === threadId);
 }
 
+// Each member's agent is briefed on its own: one model call per member, given only that member's shared facts and
+// the room's recent messages, never the other members' facts. One call speaking for everyone would hold all of them
+// at once, and could leak one member's facts through another's reply; per-recipient briefing cut such leaks from
+// 12.4% to 1.8% in CI-RELAY (2026). Replies that only pass the message on are dropped unless nobody had anything.
+export function oneAgentEach(inner: Responder): Responder {
+  return {
+    async reply(room, text) {
+      if (room.members.length <= 1) return inner.reply(room, text);
+      const each = await Promise.all(room.members.map((member) => inner.reply({ ...room, members: [member] }, text).then((rs) => rs.filter((r) => r.name === member.name))));
+      const all = each.flat();
+      const useful = all.filter((r) => r.move !== "PASS");
+      return (useful.length ? useful : all.slice(0, 1)).slice(0, 3);
+    },
+  };
+}
+
 // Rooms stay small and agents remember only a room's recent messages: both make collusion between agents less likely.
 export const MAX_ROOM = 5;
 export const ROOM_MEMORY = 12;

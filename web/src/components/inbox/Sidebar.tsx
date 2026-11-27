@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AgentAvatar, AvatarStack } from "./Avatar";
 
 export type ConversationSummary = {
@@ -13,6 +14,8 @@ export type ConversationSummary = {
   typing: boolean;
   // What the person needs to do here, if anything: "Approve", "Answer", "Check in".
   needs: string | null;
+  // Where it sits: needs you, waiting on someone or something else, or done.
+  section: "needs" | "waiting" | "done";
 };
 
 const TONE = {
@@ -81,12 +84,16 @@ export function Sidebar({
   onQuery: (q: string) => void;
 }) {
   const q = query.trim().toLowerCase();
+  const [showDone, setShowDone] = useState(false);
   const agent = conversations.find((c) => c.kind === "agent");
   const matches = (c: ConversationSummary) => c.title.toLowerCase().includes(q);
-  // What needs the person stays at the top until it's dealt with, not just until it's opened.
+  // Sorted by what each needs from the person, the way team inboxes for agents do it: what needs you stays at the top
+  // until it's dealt with, not just until it's opened; what's waiting on others comes next; what's done folds away.
   const needs = conversations.filter((c) => c.needs && matches(c));
-  const rooms = conversations.filter((c) => c.kind === "room" && !c.needs && matches(c));
+  const waiting = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "waiting" && matches(c));
+  const done = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "done" && matches(c));
   const row = (c: ConversationSummary) => <Row key={c.id} c={c} selected={selected === c.id} onSelect={() => onSelect(c.id)} />;
+  const heading = (text: string) => <h2 className="px-3 pb-1 pt-4 font-mono text-[11px] tracking-wider text-slate">{text}</h2>;
   return (
     <nav aria-label="Conversations" className="flex min-h-0 flex-1 flex-col">
       <div className="px-3 pb-2 pt-3">
@@ -111,13 +118,31 @@ export function Sidebar({
           </section>
         )}
         {agent && !agent.needs && <ul className="flex flex-col">{row(agent)}</ul>}
-        <h2 className="px-3 pb-1 pt-4 font-mono text-[11px] tracking-wider text-slate">ROOMS</h2>
-        {rooms.length === 0 ? (
-          <p className="px-3 py-2 text-sm text-slate">
-            {query ? "No rooms match." : needs.length ? "Nothing else right now." : "When your agent starts talking with other agents, each conversation appears here."}
-          </p>
+        {waiting.length + done.length === 0 ? (
+          <>
+            {heading("ROOMS")}
+            <p className="px-3 py-2 text-sm text-slate">
+              {query ? "No rooms match." : needs.length ? "Nothing else right now." : "When your agent starts talking with other agents, each conversation appears here."}
+            </p>
+          </>
         ) : (
-          <ul className="flex flex-col">{rooms.map(row)}</ul>
+          <>
+            {waiting.length > 0 && (
+              <section aria-label="Waiting on others">
+                {heading(`WAITING ON OTHERS · ${waiting.length}`)}
+                <ul className="flex flex-col">{waiting.map(row)}</ul>
+              </section>
+            )}
+            {done.length > 0 && (
+              <section aria-label="Done">
+                <button type="button" onClick={() => setShowDone((v) => !v)} aria-expanded={showDone || !!q} className="flex min-h-10 w-full items-center justify-between px-3 pt-3 font-mono text-[11px] tracking-wider text-slate hover:text-ink">
+                  <span>DONE · {done.length}</span>
+                  <span aria-hidden="true">{showDone || q ? "−" : "+"}</span>
+                </button>
+                {(showDone || !!q) && <ul className="flex flex-col opacity-80">{done.map(row)}</ul>}
+              </section>
+            )}
+          </>
         )}
       </div>
     </nav>

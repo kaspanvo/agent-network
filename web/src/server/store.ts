@@ -5,9 +5,12 @@ import { allDisclosures } from "./disclosure";
 import { isReady, isStale } from "./intake/profile";
 import { marked } from "./http";
 import { expiresAt } from "./privacy";
+import { deleteAt } from "./rooms/settle";
 import { profileOf, type AboutNote, type ProfileIntent } from "./domain";
 import type { OpenMessage } from "./intake/openmodel";
-import type { AgentKey } from "./identity";
+import type { AgentKey, Delegation } from "./identity";
+import type { Reach } from "./reach";
+import type { KeepLooking } from "./lookagain";
 import { understandingOf, type Calibration } from "./intake/calibration";
 import type { ChatItem } from "./intake/types";
 import type { PageFacts } from "./tools/reader";
@@ -74,6 +77,13 @@ export type Session = {
   followups: Record<string, { stage: "introduced" | "done"; answer?: CheckIn; dueAt?: string; asked?: boolean }>;
   // The agent's own signing key. The private half never leaves the session.
   agentKey?: AgentKey;
+  // The permissions the person gave their agent (newest last), and the counter its messages carry.
+  delegations?: Delegation[];
+  agentSeq?: number;
+  // Who can reach this agent, requests from strangers, and who's blocked.
+  reach?: Reach;
+  // The agent checks the network again on a schedule until this ends.
+  keepLooking?: KeepLooking;
   // Today's use against the person's daily quotas.
   usage?: { day: string; counts: Partial<Record<string, number>> };
   // When the person last used their agent. It's deleted RETENTION_DAYS after this.
@@ -83,6 +93,8 @@ export type Session = {
   // A simulated member made by the simulation harness (src/sim). Set by the server-side harness only, never from a
   // request, so simulated people can be told apart from real ones and kept out of real numbers.
   synthetic?: boolean;
+  // Rooms that settled, with when. Closed rooms take no more messages and are deleted ROOM_KEEP_DAYS later.
+  closed?: Record<string, string>;
 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;
@@ -150,8 +162,13 @@ export function publicSession(session: Session) {
     understanding: understandingOf(session.calibration),
     followups: session.followups,
     // The agent's public identity: what its signatures can be checked against. Never the private key.
-    agent: session.agentKey ? { id: session.agentKey.id, publicJwk: session.agentKey.publicJwk } : null,
+    agent: session.agentKey ? { id: session.agentKey.id, publicJwk: session.agentKey.publicJwk, permission: session.delegations?.at(-1) ?? null } : null,
     sources: session.sources ?? [],
+    // Who can reach the agent: the setting, strangers waiting for an answer, and who's blocked. Never the counters.
+    reach: { policy: session.reach?.policy ?? "ask", requests: (session.reach?.requests ?? []).filter((r) => r.status === "pending"), blocked: session.reach?.blocked ?? [], allowed: session.reach?.allowed ?? [] },
+    keepLooking: session.keepLooking ?? null,
+    // Settled rooms: closed, read-only, and when each is deleted.
+    closed: Object.fromEntries(Object.entries(session.closed ?? {}).map(([id, at]) => [id, { at, deleteAt: deleteAt(at) }])),
     // When the agent and everything it knows will be deleted if the person doesn't come back.
     keptUntil: new Date(expiresAt(session)).toISOString(),
   };

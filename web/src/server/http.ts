@@ -4,6 +4,7 @@ import { allow, broadcast, finish, observe, persist, type Actor } from "./actor"
 import { limitBehind } from "./limits";
 import type { AgentEvent } from "./negotiation/types";
 import { signUnsigned } from "./identity";
+import { tidyRooms } from "./rooms/settle";
 
 // EU AI Act Art. 50: what an AI agent wrote is marked as AI-generated, in a form machines can read as well as people.
 // Messages from agents in rooms, and the setup agent's words as they stream.
@@ -61,6 +62,7 @@ export function ndjson<E extends Loggable>(
       } finally {
         if (busy) finish(actor);
         await signUnsigned(actor.session).catch((err) => console.error("Couldn't sign the agent's messages:", err));
+        tidyRooms(actor);
         persist(actor);
         emit({ type: "done" });
         if (open) controller.close();

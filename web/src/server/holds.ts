@@ -14,7 +14,8 @@ const HOUR = 60 * 60 * 1000;
 const EARLY = 1000;
 
 // Something the person's agent must wake up for later, even if nobody has the page open.
-export type Wake = { kind: "check_in" | "hold"; opportunityId: string };
+// A proposal's hold running out, a check-in falling due, or the next "keep looking".
+export type Wake = { kind: "check_in" | "hold"; opportunityId: string } | { kind: "look" };
 export type Scheduler = (job: Wake, at: Date) => void;
 
 export function holdUntil(from = new Date()): string {

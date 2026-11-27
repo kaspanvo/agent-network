@@ -89,6 +89,12 @@ export const api = {
   // Forgetting removes every copy in storage; each returns the session as it now is.
   forgetIntent: (id: string) => fetch(`/api/intents/${id}`, { method: "DELETE" }).then(json<PublicSession>),
   forgetNote: (id: string) => fetch(`/api/about/${id}`, { method: "DELETE" }).then(json<PublicSession>),
+  // The agent checks the network again every day for this many days (0 stops it).
+  keepLooking: (days: 0 | 7 | 14 | 30) => post("/api/agent/keep-looking", { days }, "PUT").then(json<PublicSession>),
+  // Who can reach the agent, answering a stranger's request, and unblocking.
+  setReach: (policy: "ask" | "matched") => post("/api/reach", { policy }, "PUT").then(json<PublicSession>),
+  answerRequest: (id: string, answer: "approve" | "deny" | "block") => post(`/api/reach/requests/${id}`, { answer }).then(json<PublicSession>),
+  unblock: (agent: string) => fetch(`/api/reach/blocked/${encodeURIComponent(agent)}`, { method: "DELETE" }).then(json<PublicSession>),
   // Explicit consent to share something sensitive, and taking it back.
   consent: (id: string, share: boolean) => (share ? post(`/api/intents/${id}/consent`, {}, "PUT") : fetch(`/api/intents/${id}/consent`, { method: "DELETE" })).then(json<PublicSession>),
   intake: (input: unknown, signal?: AbortSignal) =>

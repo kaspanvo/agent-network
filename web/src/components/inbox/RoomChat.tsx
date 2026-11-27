@@ -261,6 +261,8 @@ export function RoomChat(props: {
   onUndo: () => void;
   // Agreed under an intent the person has since changed: it can be declined, not approved.
   stale: boolean;
+  // Settled and closed: read-only until it's deleted.
+  closed: { at: string; deleteAt: string } | null;
   onCheckIn: (id: string, answer: CheckIn) => void;
   // Asks the others to hold the proposal a day longer (once).
   onExtend: (id: string) => void;
@@ -278,7 +280,7 @@ export function RoomChat(props: {
   const status = statusOf(thread, busy ? undefined : opportunity ? [opportunity] : [], decision ? { [opportunity!.id]: decision } : {});
   const deal = thread.mode === "deal";
   // A limit can be changed twice per room (the server holds the same rule), so nobody can probe the other side's.
-  const canChange = !!limit && thread.timeline.filter((t) => t.kind === "note" && t.text.endsWith("Your agent reopens the conversation.")).length < 2;
+  const canChange = !!limit && !props.closed && thread.timeline.filter((t) => t.kind === "note" && t.text.endsWith("Your agent reopens the conversation.")).length < 2;
   const people = `${[...thread.others.map((o) => `${o}'s agent`), "your agent"].join(", ")} · AI agents`;
   const youSpoke = thread.timeline.some((t) => t.kind === "message" && t.event.from === "person");
   const price = opportunity ? priceOf(opportunity) : null;
@@ -332,7 +334,7 @@ export function RoomChat(props: {
             )}
             <QuickReplies
               label="Things you could ask"
-              options={live || busy || youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : starters(thread.mode, thread.who, !!thread.grouped)}
+              options={props.closed || live || busy || youSpoke || (deal && thread.status === "talking") || (opportunity && !decision) ? [] : starters(thread.mode, thread.who, !!thread.grouped)}
               onPick={(text) => {
                 jump();
                 props.onSay(text);
@@ -381,6 +383,18 @@ export function RoomChat(props: {
                   </span>
                   <span className="text-sm text-slate">{opportunity.terms.slice(price ? 1 : 0, price ? undefined : 2).join(" · ")}</span>
                 </div>
+                {opportunity.open && opportunity.open.length > 0 && !decision && (
+                  <div className="flex flex-col gap-1 text-[13px]">
+                    <span className="font-mono text-[11px] tracking-wide text-slate">STILL TO SETTLE BETWEEN YOU</span>
+                    <ul className="flex flex-wrap gap-1.5">
+                      {opportunity.open.map((o) => (
+                        <li key={o} className="rounded-full border border-dashed border-line px-2.5 py-0.5 text-slate">
+                          {o}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
                 {opportunity.previous && price && (
                   <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-slate">
                     <span className="font-mono text-[11px] tracking-wide">CHANGED SINCE V{opportunity.previous.version}</span>
@@ -468,7 +482,12 @@ export function RoomChat(props: {
         </div>
       )}
 
-      {!editing && (
+      {!editing && props.closed && (
+        <p className="border-t border-line bg-white px-4 py-4 text-center text-sm text-slate">
+          This room is closed: it settled. It&apos;s deleted on {new Date(props.closed.deleteAt).toLocaleDateString(undefined, { day: "numeric", month: "long" })}.
+        </p>
+      )}
+      {!editing && !props.closed && (
         <Composer
           placeholder={live ? "The agents are replying…" : placeholder}
           busy={live || busy}

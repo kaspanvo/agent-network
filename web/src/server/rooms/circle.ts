@@ -157,6 +157,7 @@ export function planOpportunity(plan: CirclePlan, you: string, version = 1): Opp
       `${plan.members.length + 1} people in this room are into ${lowerFirst(intent.summary)}`,
       `Shared by ${plan.members.find((m) => m.id === chosen.postedBy)?.name ?? "a member"}, who goes`,
     ],
+    open: ["How you'll find each other there", ...(others.length ? ["Everyone saying they're in"] : [])],
     version,
   };
 }

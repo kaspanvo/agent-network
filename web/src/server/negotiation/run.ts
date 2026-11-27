@@ -6,7 +6,7 @@ import { localMarket, type Market } from "../market";
 import type { Session } from "../store";
 import { guard } from "../guard";
 import { holdUntil } from "../holds";
-import { sign } from "../identity";
+import { scopeFor, sign } from "../identity";
 import type { Line, Narrator } from "./narrator";
 import { circleScript, planCircles, planOpportunity, type CirclePlan } from "../rooms/circle";
 import { listWords } from "./plan";
@@ -18,7 +18,7 @@ export const MAX_CONTACTS = 20;
 // What the person's agent says carries its signature, so it can be checked as really from this agent, unchanged.
 export async function signed(session: Session, event: AgentEvent): Promise<AgentEvent> {
   if (event.type !== "message" || (event.from !== "you" && event.from !== "person")) return event;
-  return { ...event, signature: await sign(session, event.threadId, event.text) };
+  return { ...event, ...(await sign(session, event.threadId, event.text, await scopeFor(session))) };
 }
 
 // How many proposals wait on the person at once.
@@ -34,6 +34,17 @@ export function releaseNext(session: Session): Opportunity | null {
   next.holdUntil = holdUntil();
   run.opportunities.push(next);
   return next;
+}
+
+// What a deal leaves for the people to settle once they're introduced.
+export function stillOpen(thread: Pick<ThreadPlan, "unit" | "schedule" | "kind" | "direction">): string[] {
+  const lesson = thread.unit === "hour" || thread.unit === "month";
+  return [
+    lesson ? (thread.schedule ? `Which ${thread.schedule.toLowerCase().replace(/s$/, "")} suits you both` : "A day and time that suits you both") : "When to meet",
+    lesson ? "Where the sessions happen" : thread.direction === "seek" ? "Where to see it and pick it up" : "Where they see it and pick it up",
+    "How to pay, between you",
+    ...(thread.kind === "group" ? ["Everyone in the group saying yes"] : []),
+  ];
 }
 
 export function opportunityFor(thread: ThreadPlan, you: string, version = 1, compared = 1): Opportunity {
@@ -60,6 +71,7 @@ export function opportunityFor(thread: ThreadPlan, you: string, version = 1, com
       ...(thread.schedule ? [`${thread.schedule}, as you asked`] : []),
       ...(compared > 1 ? [`The best fit of ${compared} offers your agent compared`] : []),
     ],
+    open: stillOpen(thread),
     version,
   };
 }

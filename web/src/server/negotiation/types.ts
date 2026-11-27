@@ -1,3 +1,4 @@
+import type { Envelope } from "../identity";
 import type { Unit } from "../domain";
 
 // Deals are settled by sealed offers: each agent sends its person's limit to Open's matcher, which is code.
@@ -65,6 +66,9 @@ export type Opportunity = {
   group?: boolean;
   // The standing yes this was approved under, when the person's agent said yes for them.
   approvedUnder?: string;
+  // What's agreed is above; this is what the people still settle between them once introduced (an exact time, where
+  // to meet, how to pay). Said up front, so nobody mistakes a yes for every detail being fixed.
+  open?: string[];
 };
 
 // Deal rooms negotiate a price. Circles are rooms around a shared interest. Private rooms are one-to-one with one member's agent.
@@ -90,7 +94,7 @@ export type AgentEvent =
   | { type: "note"; threadId: string; text: string }
   // `from: "person"` is the person using the app, writing in the room themself.
   // `from: "open"` is Open's matcher, which sets prices in code. `withheld` marks a message the privacy check replaced.
-  | { type: "message"; threadId: string; from: "you" | "them" | "person" | "open"; who: string; action: Action; amount: number | null; unit: Unit | null; text: string; why: string; card?: Card; withheld?: boolean; signature?: string }
+  | { type: "message"; threadId: string; from: "you" | "them" | "person" | "open"; who: string; action: Action; amount: number | null; unit: Unit | null; text: string; why: string; card?: Card; withheld?: boolean; signature?: string; envelope?: Envelope }
   | { type: "outcome"; threadId: string; result: "agreed" | "no_fit" | "open"; why: string }
   | { type: "opportunity"; opportunity: Opportunity }
   // Your agent heard every offer for one intent before choosing, in random order, and shows what it compared.
