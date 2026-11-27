@@ -129,7 +129,7 @@ Off until both are set (unset, everything stays anonymous as before):
 
 Dashboard steps in the Supabase project, before switching it on:
 
-1. **Region:** check it's an EU region (Project Settings → General). A project's region can't be changed.
+1. **Region:** check it's an EU region (Project Settings → General). A project's region can't be changed. For now Open shares the agentscrew project (US East), so its sign-in list, email templates and rate limits are shared with agentscrew; give Open its own EU project before real EU members. Anything changed there must leave agentscrew working: keep the link in the email template, and don't switch on the CAPTCHA (agentscrew's sign-in doesn't send one).
 2. **Asymmetric signing keys:** Project Settings → JWT Keys → switch to the new signing keys, so the Worker can verify tokens from the JWKS endpoint.
 3. **Email:** Authentication → SMTP → a custom sender (the built-in one allows 2 emails an hour). Authentication → Email Templates → "Magic Link": include `{{ .Token }}` so people get a 6-digit code.
 4. **Passkeys:** Authentication → Sign In / Providers → enable Passkeys, with the relying party set to Open's permanent domain (changing it later breaks every passkey).

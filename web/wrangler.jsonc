@@ -38,7 +38,10 @@
   // Workers AI: an open model runs the agent when there's no Claude key. Calls are billed even from wrangler dev.
   "ai": { "binding": "AI", "remote": true },
   "vars": {
-    "OPEN_PACE": "1"
+    "OPEN_PACE": "1",
+    // The Supabase project for accounts (public; shared with agentscrew, US East). Accounts switch on once
+    // OPEN_SUPABASE_PUBLISHABLE_KEY is also set, as a Worker secret: npx wrangler secret put OPEN_SUPABASE_PUBLISHABLE_KEY
+    "OPEN_SUPABASE_URL": "https://orfyzlnodjvimlghdbsn.supabase.co"
   },
   "observability": { "enabled": true },
   "workers_dev": true,
