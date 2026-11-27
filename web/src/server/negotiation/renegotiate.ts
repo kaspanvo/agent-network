@@ -32,9 +32,10 @@ export async function renegotiate(session: Session, threadId: string, limit: num
     emit(event);
   };
   const fmt = (n: number) => formatPrice(n, intent.unit);
-  intent.price = limit;
-  const thread = (await market.match([intent])).find((t) => t.id === threadId);
+  // Nothing changes unless the room can reopen: the new limit is only kept once the match is there.
+  const thread = (await market.match([{ ...intent, price: limit }])).find((t) => t.id === threadId);
   if (!thread) throw new Error("That conversation can't be reopened.");
+  intent.price = limit;
 
   send({ type: "note", threadId, text: `You set a new ${intent.direction === "seek" ? "limit" : "floor"} of ${fmt(limit)}. ${REOPENED}` });
   await pause(700);

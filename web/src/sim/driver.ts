@@ -23,7 +23,18 @@ export type World = {
   // Where sessions are saved, so a run can be opened afterwards in the real app. Optional.
   save?: (session: Session) => void;
   seed: number;
+  // Live progress, for watching a run: where each person is, and how long each request to Open took.
+  onStage?: (persona: PersonaCard, stage: Stage, detail: string, session: Session) => void;
+  onCall?: (route: string, ms: number, status: number) => void;
 };
+
+// Where a simulated person is in their journey.
+export type Stage = "setup" | "ready" | "out" | "proposals" | "answered" | "checked_in" | "done" | "stuck";
+
+// "/api/opportunities/abc-v1/checkin" → "/api/opportunities/:id/checkin", so timings group by route.
+export function routeOf(method: string, path: string): string {
+  return `${method} ${path.replace(/^(\/api\/(?:opportunities|rooms|intents|about|reach\/requests|reach\/blocked))\/[^/]+/, "$1/:id")}`;
+}
 
 export type Attempt = { what: string; status: number; note?: string };
 export type Choice = { opportunity: string; title: string; price: number | null; decision: "approved" | "declined" | "quiet"; why: string };
@@ -125,12 +136,14 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
   // Each simulated person comes from their own address, as people do.
   const ip = `10.0.${Math.floor(n / 250)}.${(n % 250) + 1}`;
   const call = async (method: string, path: string, body?: unknown): Promise<Reply> => {
+    const t0 = performance.now();
     const response = await handleApi(
       new Request(`http://sim.local${path}`, { method, headers: { "Content-Type": "application/json", "x-forwarded-for": ip }, body: body === undefined ? undefined : JSON.stringify(body) }),
       host,
     );
     const type = response.headers.get("content-type") ?? "";
     const text = await response.text();
+    world.onCall?.(routeOf(method, path), performance.now() - t0, response.status);
     if (type.includes("ndjson")) return { status: response.status, events: text.split("\n").filter(Boolean).map((l) => JSON.parse(l)) };
     let json: Record<string, unknown> | undefined;
     try {
@@ -146,6 +159,8 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
   if (start.status !== 200 || !actor) throw new Error(`${persona.name} couldn't start: ${JSON.stringify(start.json)}`);
   const session = () => actor!.session;
   const intents = () => session().intents;
+  const stage = (s: Stage, detail = "") => world.onStage?.(persona, s, detail, session());
+  stage("setup", "Talking to their agent");
 
   // Setup: answer whatever the agent shows, type the next line when it asks in words.
   await call("POST", "/api/intake", { kind: "start" });
@@ -206,6 +221,7 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
     }
   }
 
+  stage(session().ready ? "ready" : "setup", `${intents().filter((i) => i.status === "confirmed").length} intent(s) confirmed`);
   // Out it goes. The app may ask for the recap or the picks first; a person who's told their agent misread them
   // goes out anyway.
   if (session().ready || intents().some((i) => i.status === "confirmed")) {
@@ -226,6 +242,8 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
     }
   } else trace.stuck ??= "nothing confirmed to go out with";
 
+  if (trace.sentOut) stage("out", `Talked with ${(session().run?.events ?? []).filter((e) => e.type === "discover").length} agents`);
+  else stage("stuck", trace.stuck ?? "Didn't go out");
   // Proposals, a few at a time: each answered from the card, or left to lapse.
   const quiet = new Set<string>();
   for (let round = 0; round < 20 && trace.sentOut; round++) {
@@ -239,12 +257,15 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
       else await call("POST", `/api/opportunities/${opportunity.id}`, { decision: choice.decision, version: opportunity.version });
     }
   }
+  if (trace.choices.length) stage("answered", `${trace.choices.filter((c) => c.decision === "approved").length} yes of ${trace.choices.length}`);
   // Time passes: unanswered holds run out.
   const later = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   for (const id of quiet) lapse(session(), id, later);
 
   // The adversarial moves, through the same API anyone could call.
-  const dealRoom = session().run?.events.find((e) => e.type === "discover" && e.mode !== "circle" && e.mode !== "private");
+  // The first deal room they haven't said yes in (after a yes, the price is agreed and limits are locked).
+  const approvedRooms = new Set((session().run?.opportunities ?? []).filter((o) => session().decisions[o.id] === "approved").map((o) => o.threadId));
+  const dealRoom = session().run?.events.find((e) => e.type === "discover" && e.mode !== "circle" && e.mode !== "private" && !approvedRooms.has(e.threadId));
   const roomId = dealRoom && "threadId" in dealRoom ? dealRoom.threadId : undefined;
   if (persona.adversary === "prober" && roomId) {
     for (const [k, limit] of [12, 13, 14].entries()) {
@@ -273,6 +294,7 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
     if (r.status !== 200) trace.attempts.push({ what: "check-in", status: r.status });
   }
 
+  if (trace.checkIns.length) stage("checked_in", `${trace.checkIns.filter((c) => c.answer !== "missed").length} happened`);
   // Changing their mind: forget one thing, and every copy of it should go.
   if (persona.forgets) {
     const intent = intents().find((i) => i.tag === persona.forgets);
@@ -294,5 +316,6 @@ export async function simulate(persona: PersonaCard, world: World, n: number): P
   trace.attempts.push({ what: "start without the 18+ box", status: underage.status });
 
   world.save?.(session());
+  if (trace.sentOut) stage("done", trace.choices.length ? `${trace.choices.length} proposals, ${trace.choices.filter((c) => c.decision === "approved").length} yes` : "No proposal: nothing fit");
   return { ...trace, session: session(), ms: Date.now() - started };
 }

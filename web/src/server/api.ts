@@ -224,20 +224,24 @@ function exportSession(_request: Request, host: Host) {
 }
 
 // "Forget this": removes the intent and every copy of the words in storage, the model's memory included.
-function forgetIntentRoute(_request: Request, host: Host, [id]: string[]) {
+async function forgetIntentRoute(_request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to come back.", 409);
   if (!forgetIntent(actor.session, id!)) return jsonError("That's already gone.", 404);
+  // Words changed in rooms lose their old signature; the agent signs them again as they are now.
+  await signUnsigned(actor.session);
   persist(actor);
   return Response.json(publicSession(actor.session));
 }
 
-function forgetNoteRoute(_request: Request, host: Host, [id]: string[]) {
+async function forgetNoteRoute(_request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
   if (actor.busy) return jsonError("Your agent is still out. Wait for it to come back.", 409);
   if (!forgetNote(actor.session, id!)) return jsonError("That's already gone.", 404);
+  // Words changed in rooms lose their old signature; the agent signs them again as they are now.
+  await signUnsigned(actor.session);
   persist(actor);
   return Response.json(publicSession(actor.session));
 }
@@ -731,10 +735,16 @@ async function renegotiateRoom(request: Request, host: Host, [id]: string[]) {
   const input = await body(request, z.object({ limit: z.number().finite().positive().max(100000) }));
   if (!input) return jsonError("Choose a new limit.", 400);
   if (isClosed(actor.session, id!)) return jsonError("This room is closed: it settled. Send your agent out again to find something new.", 409);
+  // Once you've said yes in a room, the price there is agreed: changing your limit afterwards can't reopen it.
+  const latest = (actor.session.run?.opportunities ?? []).filter((o) => o.threadId === id).at(-1);
+  if (latest && actor.session.decisions[latest.id] === "approved") return jsonError("You've already said yes in this room, so the price is agreed. To look for something else, send your agent out again.", 409);
   if (renegotiationsLeft(actor.session, id!) === 0) return jsonError(`You've changed your limit in this room ${MAX_RENEGOTIATIONS} times. It stays as it is now, so nobody can narrow down what the other side would accept.`, 409);
   const over = quota(actor, "renegotiations");
   if (over) return over;
   const intent = actor.session.intents.find((i) => id!.startsWith(`${i.id}-`));
+  // Said before anything streams: a room whose other side is no longer offered can't reopen, and nothing changes.
+  if (intent && !(await (host.market ?? localMarket()).match([{ ...intent, price: input.limit }])).some((t) => t.id === id))
+    return jsonError("This conversation can't be reopened right now. Your limit is unchanged.", 409);
   if (intent) record(actor, { kind: "you", by: "you", room: id, text: `You changed your private ${intent.direction === "seek" ? "limit" : "floor"} for “${intent.summary}” to ${formatPrice(input.limit, intent.unit)}` });
   const narrator = agentsOf(host).narrator();
   return ndjson<AgentEvent>(

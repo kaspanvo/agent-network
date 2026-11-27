@@ -82,7 +82,8 @@ export function checksFor(session: Session, threadId: string): Check[] {
         const d = permits.find((p) => p.id === m.envelope!.scope);
         return !!d && (!tag || d.tags.includes(tag)) && m.envelope!.at >= d.issuedAt && m.envelope!.at <= d.until;
       });
-      const ordered = scoped.every((m, i) => i === 0 || m.envelope!.seq > scoped[i - 1]!.envelope!.seq);
+      // Each counter is used once. (A message re-signed after you asked to forget something gets a new, higher one.)
+      const ordered = new Set(scoped.map((m) => m.envelope!.seq)).size === scoped.length;
       checks.push({
         label: "Within the permission you gave",
         ok: inScope && ordered,

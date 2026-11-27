@@ -1,5 +1,6 @@
 import { lowerFirst, profileOf } from "./domain";
 import { isReady } from "./intake/profile";
+import { circleId } from "./rooms/circle";
 import { RETENTION_DAYS } from "./retention";
 import { entryHash, type Session } from "./store";
 
@@ -121,7 +122,12 @@ export function forgetIntent(session: Session, id: string): boolean {
   if (session.run) {
     const gone = new Set(session.run.opportunities.filter((o) => o.intentId === id).map((o) => o.id));
     for (const o of session.run.queued ?? []) if (o.intentId === id) gone.add(o.id);
-    session.run.events = session.run.events.filter((e) => !("threadId" in e) || typeof e.threadId !== "string" || !e.threadId.startsWith(`${id}-`));
+    // Every room that came from it: deal rooms ("<intent>-<member>"), its interest room ("circle-<intent>"), and any
+    // room a proposal for it lives in.
+    const rooms = new Set([circleId(id), ...[...session.run.opportunities, ...(session.run.queued ?? [])].filter((o) => o.intentId === id).map((o) => o.threadId)]);
+    const fromIt = (threadId: string) => threadId.startsWith(`${id}-`) || rooms.has(threadId);
+    session.run.events = session.run.events.filter((e) => !("threadId" in e) || typeof e.threadId !== "string" || !fromIt(e.threadId));
+    if (session.closed) for (const room of Object.keys(session.closed)) if (fromIt(room)) delete session.closed[room];
     session.run.opportunities = session.run.opportunities.filter((o) => !gone.has(o.id));
     if (session.run.queued) session.run.queued = session.run.queued.filter((o) => !gone.has(o.id));
     for (const oid of gone) {

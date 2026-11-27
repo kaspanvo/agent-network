@@ -167,6 +167,8 @@ export function publicSession(session: Session) {
     // Who can reach the agent: the setting, strangers waiting for an answer, and who's blocked. Never the counters.
     reach: { policy: session.reach?.policy ?? "ask", requests: (session.reach?.requests ?? []).filter((r) => r.status === "pending"), blocked: session.reach?.blocked ?? [], allowed: session.reach?.allowed ?? [] },
     keepLooking: session.keepLooking ?? null,
+    // A simulated member: the inbox says so, with a way back to the simulation.
+    synthetic: !!session.synthetic,
     // Settled rooms: closed, read-only, and when each is deleted.
     closed: Object.fromEntries(Object.entries(session.closed ?? {}).map(([id, at]) => [id, { at, deleteAt: deleteAt(at) }])),
     // When the agent and everything it knows will be deleted if the person doesn't come back.

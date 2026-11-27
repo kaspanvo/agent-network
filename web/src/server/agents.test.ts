@@ -178,3 +178,24 @@ describe("proposals say what's still to settle", () => {
     expect(intro && "text" in intro ? intro.text : "").toContain("Still to settle between you");
   });
 });
+
+describe("changing a limit in a room", () => {
+  it("changes nothing when the room can't reopen, so it doesn't slip past the cap", async () => {
+    const session = await outWith();
+    const room = session.run!.events.find((e) => e.type === "discover" && e.mode !== "circle")!;
+    const threadId = "threadId" in room ? room.threadId : "";
+    // The other side is no longer offered (say, paused): the market doesn't return this room.
+    const host = { ...hostFor(session), market: { match: async () => [] } };
+    const reply = await handleApi(at(`/api/rooms/${threadId}/renegotiate`, { method: "POST", body: JSON.stringify({ limit: 11 }) }), host);
+    expect(reply.status).toBe(409);
+    expect(session.intents[0]!.price).toBe(15);
+  });
+
+  it("is locked once you've said yes in that room", async () => {
+    const session = await outWith();
+    const offer = session.run!.opportunities[0]!;
+    await decide(session, offer.id, "approved", () => {});
+    const reply = await handleApi(at(`/api/rooms/${offer.threadId}/renegotiate`, { method: "POST", body: JSON.stringify({ limit: 20 }) }), hostFor(session));
+    expect(reply.status).toBe(409);
+  });
+});

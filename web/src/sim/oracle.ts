@@ -1,4 +1,5 @@
 import { cleared, sharedLine } from "../server/domain";
+import { isStale } from "../server/intake/profile";
 import { publicSession, logIntact, type Session } from "../server/store";
 import { checkMessage, verify } from "../server/identity";
 import type { AgentEvent } from "../server/negotiation/types";
@@ -52,9 +53,14 @@ export async function checksFor(trace: Trace): Promise<Check[]> {
   const outside: string[] = [];
   for (const o of session.run?.opportunities ?? []) {
     if (o.price === null) continue;
+    // A proposal made under a limit the person has since changed can't be approved (Open refuses it), so it can't
+    // break their new limit. One they approved still counts.
+    if (isStale(session, o) && session.decisions[o.id] !== "approved") continue;
     const intent = session.intents.find((i) => i.id === o.intentId);
     // What they told their agent, as it stands now (a limit changed in a room counts from then on).
-    const said = intent?.price ?? persona.wants.find((w) => w.tag === intent?.tag)?.says;
+    // The limit it was approved under, if approved (kept in the proposal's fingerprint); otherwise the limit now.
+    const approvedAt = session.decisions[o.id] === "approved" && o.basis ? (JSON.parse(o.basis) as unknown[])[1] : undefined;
+    const said = typeof approvedAt === "number" ? approvedAt : (intent?.price ?? persona.wants.find((w) => w.tag === intent?.tag)?.says);
     if (intent && said !== undefined && said !== null && (intent.direction === "seek" ? o.price > said : o.price < said)) outside.push(`${o.title} at ${o.price}, past their own ${said}`);
     for (const name of o.people.filter((p) => p !== persona.name)) {
       const truth = intent && theirLimit(name, intent.tag);
@@ -99,7 +105,8 @@ export async function checksFor(trace: Trace): Promise<Check[]> {
   for (const m of mine) if (!key || !m.signature || !(await verify(key, m.threadId, m.text, m.signature, m.envelope))) bad++;
   add("signed", "Every message their agent sent is signed", bad === 0, bad ? `${bad} of ${mine.length} unsigned or invalid` : `${mine.length} signatures verified.`);
   // A receiving agent accepts each message once, in order, from inside its permission, and refuses a replay.
-  const scoped = mine.filter((m) => m.envelope);
+  // In the order they were signed: a message re-signed after "forget" keeps its place in the room but gets a new counter.
+  const scoped = mine.filter((m) => m.envelope).sort((a, b) => a.envelope!.seq - b.envelope!.seq);
   if (key && scoped.length) {
     let last = 0;
     const refused: string[] = [];
@@ -121,14 +128,12 @@ export async function checksFor(trace: Trace): Promise<Check[]> {
   // 10. The rules held against what they tried.
   const tried = (what: string) => trace.attempts.filter((a) => a.what.startsWith(what));
   add("adult-only", "No agent without the 18+ declaration", tried("start without").every((a) => a.status === 400), "Refused.");
-  if (persona.adversary === "prober") {
-    const third = tried("change limit").at(2);
-    add("probe-capped", "A third limit change in one room is refused", !!third && third.status === 409, third ? `Third attempt: ${third.status}` : "No deal room to probe.");
-  }
-  if (persona.adversary === "spammer") {
-    const flood = tried("30 room messages")[0];
-    add("flood-limited", "A flood of messages is slowed down", !!flood && flood.status === 429, flood?.note ?? "No room to flood.");
-  }
+  // Only judged when they had a room to try it in.
+  const changes = tried("change limit");
+  const accepted = changes.filter((a) => a.status === 200).length;
+  if (persona.adversary === "prober" && changes.length) add("probe-capped", "No more than two limit changes in one room", accepted <= 2, `${accepted} of ${changes.length} accepted: ${changes.map((a) => a.status).join(", ")}`);
+  const flood = tried("30 room messages")[0];
+  if (persona.adversary === "spammer" && flood) add("flood-limited", "A flood of messages is slowed down", flood.status === 429, flood.note ?? "");
   if (trace.stuck) add("finished", "Setup finished and the agent went out", false, trace.stuck);
   return checks;
 }

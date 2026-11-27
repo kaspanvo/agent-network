@@ -3,6 +3,7 @@
 //   npm run sim                      12 simulated people, scripted agents, free, about a second
 //   npm run sim -- --seed 7          a different (but repeatable) run
 //   npm run sim -- --runs 20         20 seeds, to see how much the numbers move between runs
+//   npm run sim -- --people 100 --concurrency 10   a generated crowd, ten using Open at once
 //   npm run sim -- --live-model      the person's agent runs on whatever model the environment gives it (costs money)
 //
 // It writes .data/sim/<time>/report.html and run.json (gitignored) and saves each simulated person's agent to the
@@ -25,9 +26,12 @@ if (!flag("live-model")) process.env.OPEN_AGENT_MODE = "demo";
 const { runScenario } = await import("./scenario");
 const { reportHtml } = await import("./report");
 const { saveSession } = await import("../server/local/files");
+const { cohortOf } = await import("./generate");
 
 const seed = value("seed", 1);
 const runs = Math.max(1, Math.min(100, value("runs", 1)));
+const people = Math.max(4, Math.min(500, value("people", 12)));
+const concurrency = Math.max(1, Math.min(50, value("concurrency", 1)));
 const out = join(process.cwd(), ".data", "sim", new Date().toISOString().replace(/[:.]/g, "-"));
 mkdirSync(out, { recursive: true });
 
@@ -36,9 +40,11 @@ for (let r = 0; r < runs; r++) {
   const first = r === 0;
   const run = await runScenario({
     seed: seed + r,
+    personas: cohortOf(people, seed + r, { awkward: !flag("no-awkward") }),
+    concurrency,
     // Only the first run's people are saved to open in the app; the rest are for the numbers.
     save: first ? saveSession : undefined,
-    onPerson: (t) => first && console.log(`  ${t.persona.name.padEnd(6)} ${t.sentOut ? `out · ${t.choices.length} proposals · ${t.choices.filter((c) => c.decision === "approved").length} yes` : `not out: ${t.stuck}`}`),
+    onPerson: (t) => first && people <= 20 && console.log(`  ${t.persona.name.padEnd(6)} ${t.sentOut ? `out · ${t.choices.length} proposals · ${t.choices.filter((c) => c.decision === "approved").length} yes` : `not out: ${t.stuck}`}`),
   });
   results.push(run);
   if (first) {
@@ -56,6 +62,8 @@ const m = first.metrics;
 console.log(`Funnel: ${m.people} started → ${m.ready} ready → ${m.sentOut} out → ${m.gotProposal} got a proposal → ${m.saidYes} said yes → ${m.happened} happened`);
 console.log(`Deals lost to the pricing rule: ${m.missedDeals.length}${m.missedDeals.length ? ` (${m.missedDeals.map((d) => `${d.person}–${d.with}`).join(", ")})` : ""}`);
 console.log(`Checks: ${first.checks.length - failed.length} passed, ${failed.length} failed`);
+console.log(`Load: ${first.perf.requests} requests, ${first.perf.perSecond.toFixed(0)}/s with ${first.perf.concurrency} at once; slowest p95: ${first.perf.routes.slice().sort((a, b) => b.p95 - a.p95).slice(0, 3).map((r) => `${r.route} ${r.p95.toFixed(0)} ms`).join(", ")}`);
+if (first.bookings[0]) console.log(`Most booked: ${first.bookings.slice(0, 3).map((b) => `${b.name} ×${b.deals}`).join(", ")} (no capacity limits yet)`);
 for (const c of failed) console.log(`  ✗ ${c.persona}: ${c.name}. ${c.detail}`);
 
 if (runs > 1) {

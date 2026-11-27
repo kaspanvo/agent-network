@@ -72,6 +72,8 @@ export function InboxApp() {
   const [turnstileAttempt, setTurnstileAttempt] = useState(0);
   // The person said they're 18 or over. Open is for adults.
   const [adult, setAdult] = useState(false);
+  // Looking at a simulated member's inbox, opened from the Simulation page.
+  const [synthetic, setSynthetic] = useState(false);
 
   const { run, running, busyRoom, decisions } = runs;
   // The agent is out on a run, as opposed to streaming one room's replies, a yes, or a check-in.
@@ -99,6 +101,7 @@ export function InboxApp() {
         setTurnstileKey(turnstile);
         if (!session) return;
         setName(session.name);
+        setSynthetic(session.synthetic);
         setTrust(trustOf(session));
         intake.load(session);
         runs.load(session);
@@ -426,6 +429,16 @@ export function InboxApp() {
         </button>
       </AppHeader>
 
+      {synthetic && (
+        <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-signal-soft px-4 py-2 text-center text-sm text-signal-ink">
+          <span>You&apos;re seeing {name}&apos;s inbox, a simulated member. Everything here is invented.</span>
+          {/* A local route that gives you back your own agent before returning to the simulation. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/api/dev/back" className="font-semibold underline underline-offset-2">
+            Back to the simulation
+          </a>
+        </div>
+      )}
       <div className="flex min-h-0 flex-1">
         <aside className={`${selected ? "hidden" : "flex"} w-full flex-col border-r border-line bg-white md:flex md:w-[300px] lg:w-[330px]`} aria-label="Inbox">
           <div className="flex items-baseline justify-between px-5 pt-4">
