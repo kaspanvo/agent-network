@@ -33,6 +33,13 @@
     0%, 100% { opacity: 0.25; }
     50% { opacity: 1; }
   }
+
+  /* Something new arriving (a proposal): a short spring, about 450 ms, approximated with linear(). */
+  --animate-arrive: arrive 460ms linear(0, 0.21 9%, 0.66 21%, 1.02 34%, 1.1 42%, 1.06 52%, 0.99 65%, 1) both;
+  @keyframes arrive {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
 }
 
 @theme inline {
@@ -54,6 +61,61 @@
     outline: 2px solid var(--color-signal);
     outline-offset: 2px;
   }
+}
+
+/* Agent avatars: a sphere of dots whose motion says what the agent is doing (see components/inbox/Avatar.tsx). */
+.dot-agent .av-sphere,
+.dot-agent .av-ring,
+.dot-agent .av-check {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+}
+.dot-agent.av-moving .av-sphere {
+  animation: av-spin var(--av-period, 24s) linear infinite, av-breathe 4s ease-in-out infinite;
+}
+.dot-agent.av-moving.av-working .av-sphere { --av-period: 6s; }
+.dot-agent.av-moving.av-negotiating .av-sphere { --av-period: 9s; }
+.dot-agent.av-moving.av-working .av-dot,
+.dot-agent.av-moving.av-negotiating .av-dot {
+  animation: av-shimmer 1.6s ease-in-out infinite;
+}
+.dot-agent.av-moving.av-learning .av-sphere {
+  animation: av-gather 1.2s ease-out both, av-spin 12s linear infinite;
+}
+.dot-agent.av-rest .av-sphere,
+.dot-agent.av-rest .av-dot { animation-play-state: paused; }
+.dot-agent .av-ring { opacity: 0; }
+.dot-agent.av-moving.av-needs .av-ring {
+  animation: av-pulse 2s ease-out 3;
+}
+.dot-agent.av-done .av-check {
+  animation: arrive 460ms linear(0, 0.21 9%, 0.66 21%, 1.02 34%, 1.1 42%, 1.06 52%, 0.99 65%, 1) both;
+}
+.dot-agent.av-paused { filter: grayscale(1); }
+@keyframes av-spin { to { rotate: 360deg; } }
+@keyframes av-breathe { 0%, 100% { scale: 0.98; } 50% { scale: 1.02; } }
+@keyframes av-shimmer { 0%, 100% { opacity: 0.35; } 40% { opacity: 1; } }
+@keyframes av-gather { from { scale: 0.7; opacity: 0.4; } to { scale: 1; opacity: 1; } }
+@keyframes av-pulse { 0% { opacity: 0.9; scale: 0.9; } 100% { opacity: 0; scale: 1.12; } }
+
+/* Being introduced: each agent's sphere fades into its person, while a dotted line draws between them. */
+.handoff-agent { animation: handoff-agent 900ms ease-in 400ms both; }
+.handoff-person { animation: arrive 460ms linear(0, 0.21 9%, 0.66 21%, 1.02 34%, 1.1 42%, 1.06 52%, 0.99 65%, 1) 900ms both; }
+.handoff-line line { stroke-dashoffset: 40; animation: handoff-line 700ms ease-out 1100ms both; }
+@keyframes handoff-agent { from { opacity: 1; scale: 1; } to { opacity: 0; scale: 0.6; } }
+@keyframes handoff-line { from { opacity: 0; } to { opacity: 1; } }
+
+/* Opening a conversation: the browser's own page transition, a short slide and fade. */
+::view-transition-old(root) { animation: 160ms ease-out both vt-out; }
+::view-transition-new(root) { animation: 280ms cubic-bezier(0.2, 0, 0, 1) both vt-in; }
+@keyframes vt-out { to { opacity: 0; } }
+@keyframes vt-in { from { opacity: 0; transform: translateX(12px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .dot-agent .av-sphere, .dot-agent .av-dot, .dot-agent .av-ring { animation: none !important; }
+  .handoff-agent { animation: none !important; opacity: 0; }
+  .handoff-person, .handoff-line line { animation: none !important; }
+  ::view-transition-old(root), ::view-transition-new(root) { animation: none !important; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -9,7 +9,7 @@ import type { LogActor, LogEntry } from "@/server/store";
 import { useState } from "react";
 import { NetworkGraph } from "../agent/NetworkGraph";
 import { AgentPanel, type MandateControls, type PrivacyControls } from "../start/AgentPanel";
-import { AgentAvatar, Avatar } from "./Avatar";
+import { AgentAvatar } from "./Avatar";
 import type { Shortlist, Thread } from "./runState";
 
 const DOT: Record<LogEntry["kind"], string> = {
@@ -251,7 +251,6 @@ export function AgentDetails(props: {
 }) {
   return (
     <div className="flex flex-col gap-5">
-      <ModelNote mode={props.mode} model={props.model} />
       <AgentPanel
         name={props.name}
         intents={props.intents}
@@ -282,6 +281,8 @@ export function AgentDetails(props: {
         </section>
       )}
       <Knows intents={props.intents} understanding={props.understanding} onForget={props.privacy.onForget} />
+      {/* Which model runs the agent: worth knowing, but after what the agent knows about you. */}
+      <ModelNote mode={props.mode} model={props.model} />
       <ActivityLog log={props.log} intact={props.logIntact} onOpenRoom={props.onOpenRoom} />
     </div>
   );
@@ -320,7 +321,7 @@ export function RoomDetails({
         <h3 className="font-mono text-[11px] tracking-wider text-slate">IN THIS ROOM</h3>
         <ul className="flex flex-col gap-2">
           <li className="flex items-center gap-2.5">
-            <AgentAvatar size={30} />
+            <AgentAvatar size={30} still />
             <span className="flex flex-col">
               <span className="font-medium">Your agent</span>
               <span className="text-[13px] text-slate">Speaks for {you}</span>
@@ -328,7 +329,7 @@ export function RoomDetails({
           </li>
           {thread.others.map((name) => (
             <li key={name} className="flex items-center gap-2.5">
-              <Avatar name={name} size={30} />
+              <AgentAvatar mine={false} owner={name} size={30} still />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="font-medium">{name}&apos;s agent</span>
                 <span className="text-[13px] text-slate">{role(name)}</span>

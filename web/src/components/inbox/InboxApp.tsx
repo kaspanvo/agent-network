@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { api } from "@/lib/client";
 import type { AgentMode } from "@/server/pace";
 import type { PublicSession } from "@/server/store";
 import { AppHeader } from "../AppHeader";
 import { AgentChat } from "./AgentChat";
-import { AgentAvatar } from "./Avatar";
+import { AgentHome } from "./AgentHome";
+import { AgentAvatar, type AgentState } from "./Avatar";
 import { AgentDetails, RoomDetails } from "./Details";
 import { TurnstileCheck } from "../start/Turnstile";
 import { useIntake, useRun } from "./hooks";
@@ -23,14 +25,6 @@ type Pending = { id: string; decision: "approved" | "declined"; until: number };
 
 function trustOf(session: PublicSession): Trust {
   return { log: session.log, logIntact: session.logIntact, checks: session.checks, disclosures: session.disclosures, understanding: session.understanding, stale: session.stale, closed: session.closed, reach: session.reach, keepLooking: session.keepLooking };
-}
-
-function readWhy(): boolean {
-  try {
-    return localStorage.getItem("open:showWhy") !== "0";
-  } catch {
-    return true;
-  }
 }
 
 function urlConversation(): string | null {
@@ -60,7 +54,6 @@ export function InboxApp() {
   const [loaded, setLoaded] = useState(false);
   // Only read on the client after loading, so the server render and the first client render match.
   const [selected, setSelected] = useState<string | null>(() => (typeof window === "undefined" ? null : urlConversation()));
-  const [showWhy, setShowWhy] = useState(() => (typeof window === "undefined" ? true : readWhy()));
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [seen, setSeen] = useState<Record<string, number>>({});
@@ -157,19 +150,16 @@ export function InboxApp() {
 
   // Leaving a conversation marks what you saw in it as read.
   const select = (id: string | null) => {
-    setSeen((s) => ({ ...s, [current]: countFor(current), ...(id ? { [id]: countFor(id) } : {}) }));
-    setSelected(id);
-    setDetailsOpen(false);
+    const go = () => {
+      setSeen((s) => ({ ...s, [current]: countFor(current), ...(id ? { [id]: countFor(id) } : {}) }));
+      setSelected(id);
+      setDetailsOpen(false);
+    };
+    // Opening a conversation slides it in with the browser's own page transition, where there is one and motion is welcome.
+    const doc = document as Document & { startViewTransition?: (update: () => void) => unknown };
+    if (doc.startViewTransition && id !== current && !window.matchMedia("(prefers-reduced-motion: reduce)").matches) doc.startViewTransition(() => flushSync(go));
+    else go();
     window.history.pushState(null, "", id ? `?c=${encodeURIComponent(id)}` : window.location.pathname);
-  };
-
-  const toggleWhy = () => {
-    setShowWhy((v) => {
-      try {
-        localStorage.setItem("open:showWhy", v ? "0" : "1");
-      } catch {}
-      return !v;
-    });
   };
 
   // Sending the agent out. If the recap needs another look first, the agent shows it, instead of a refusal.
@@ -257,6 +247,7 @@ export function InboxApp() {
     onReach: (policy: "ask" | "matched") => void privately(() => api.setReach(policy)),
     onAnswer: (id: string, answer: "approve" | "deny" | "block") => void privately(() => api.answerRequest(id, answer)),
     onUnblock: (agent: string) => void privately(() => api.unblock(agent)),
+    onDeleteAll: () => void startOver(),
   };
 
   const openPrivate = async (person: string) => {
@@ -371,7 +362,7 @@ export function InboxApp() {
       <div className="flex min-h-dvh flex-col">
         <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
         <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-5 px-4 py-10">
-          <AgentAvatar size={52} />
+          <AgentAvatar size={64} state="idle" />
           <h1 className="font-display text-3xl tracking-tight">Hi, I&apos;m your agent on Open</h1>
           <p className="text-lg text-slate">I&apos;ll learn what you&apos;d be open to, then talk with other people&apos;s agents and bring back only what fits. What should I call you?</p>
           <form onSubmit={begin} className="flex gap-2">
@@ -419,15 +410,47 @@ export function InboxApp() {
     );
 
   const sentOut = running || run.threads.length > 0;
+
+  // What the agent is doing, for its avatar and the home card.
+  const needing = conversations.filter((c) => c.needs);
+  const agentState: AgentState = out ? "negotiating" : intake.busy ? "learning" : needing.length ? "needs" : run.threads.length ? "done" : "idle";
+  const waitingRooms = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "waiting").length;
+  const doneRooms = conversations.filter((c) => c.kind === "room" && c.section === "done").length;
+  const dayWords = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: "long" });
+  const home = {
+    state: agentState,
+    headline:
+      agentState === "negotiating"
+        ? (run.status ?? "Out talking with other agents")
+        : agentState === "learning"
+          ? "Listening to you"
+          : agentState === "needs"
+            ? `${needing.length} thing${needing.length === 1 ? "" : "s"} need${needing.length === 1 ? "s" : ""} you`
+            : agentState === "done"
+              ? "Back from the network. Nothing waiting on you."
+              : intake.ready
+                ? "Ready to go out"
+                : "Tell your agent what you'd be open to",
+    lines: [
+      ...(waitingRooms ? [`${waitingRooms} room${waitingRooms === 1 ? "" : "s"} waiting on others`] : []),
+      ...(doneRooms ? [`${doneRooms} done`] : []),
+      ...(trust.keepLooking ? [`Looks again ${dayWords(trust.keepLooking.next)}`] : []),
+    ],
+    action:
+      agentState === "needs"
+        ? { label: needing[0]!.kind === "agent" ? "Answer your agent" : `Open ${needing[0]!.title}`, onClick: () => select(needing[0]!.id) }
+        : agentState === "idle" && intake.ready && !sentOut
+          ? { label: "Send my agent out", onClick: () => void sendOut() }
+          : agentState === "idle" && !intake.ready
+            ? { label: "Talk to your agent", onClick: () => select(AGENT) }
+            : null,
+  };
   const offer = thread ? run.opportunities.find((o) => o.threadId === thread.id) : undefined;
 
   return (
     <div className="flex h-dvh flex-col">
-      <AppHeader label="YOUR INBOX" mode={mode} resting={resting}>
-        <button type="button" onClick={startOver} className="min-h-11 px-2 text-sm text-mist hover:text-cloud">
-          Start over
-        </button>
-      </AppHeader>
+      {/* Deleting everything lives with your data in the profile, not one tap from the inbox. */}
+      <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
 
       {synthetic && (
         <div role="status" className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-signal-soft px-4 py-2 text-center text-sm text-signal-ink">
@@ -445,7 +468,8 @@ export function InboxApp() {
             <h1 className="font-display text-2xl font-semibold tracking-tight">Inbox</h1>
             <span className="text-sm text-slate">{name}</span>
           </div>
-          <Sidebar conversations={conversations} selected={current} onSelect={select} query={query} onQuery={setQuery} />
+          <AgentHome {...home} />
+          <Sidebar conversations={conversations} selected={current} onSelect={select} query={query} onQuery={setQuery} agentState={agentState} />
         </aside>
 
         <main className={`${selected ? "flex" : "hidden"} min-w-0 flex-1 flex-col md:flex`}>
@@ -460,8 +484,6 @@ export function InboxApp() {
               live={isLive(thread)}
               busy={running}
               error={run.error}
-              showWhy={showWhy}
-              onToggleWhy={toggleWhy}
               onDecide={decideLater}
               pending={pending && offer && pending.id === offer.id ? pending : null}
               onUndo={() => setPending(null)}
@@ -476,6 +498,7 @@ export function InboxApp() {
             />
           ) : (
             <AgentChat
+              agentState={agentState}
               name={name}
               chat={intake.chat}
               intents={intake.intents}

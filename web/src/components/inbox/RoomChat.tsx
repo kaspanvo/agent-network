@@ -90,12 +90,40 @@ function HeldUntil({ opportunity, busy, onExtend }: { opportunity: Opportunity; 
   );
 }
 
-function FollowUp({ item, due, busy, onCheckIn }: { item: Extract<TimelineItem, { kind: "followup" }>; due: boolean; busy: boolean; onCheckIn: (answer: CheckIn) => void }) {
+// Being introduced: the agents step back and the people meet. Each agent's sphere fades into its person, along a
+// dotted line drawn between them, the same idea as the landing page, where spheres of dots become people.
+function Handoff({ you, others }: { you: string; others: string[] }) {
+  const people = [you, ...others].slice(0, 4);
+  return (
+    <div className="flex items-center justify-center gap-1 py-1" aria-hidden="true">
+      {people.map((name, i) => (
+        <span key={name} className="flex items-center gap-1">
+          {i > 0 && (
+            <svg width="36" height="8" viewBox="0 0 36 8" className="handoff-line">
+              <line x1="2" y1="4" x2="34" y2="4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeDasharray="0.1 6" />
+            </svg>
+          )}
+          <span className="relative inline-flex">
+            <span className="handoff-person">
+              <Avatar name={name} size={34} />
+            </span>
+            <span className="handoff-agent absolute inset-0">
+              <AgentAvatar size={34} mine={i === 0} owner={i === 0 ? undefined : name} still />
+            </span>
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function FollowUp({ item, due, busy, onCheckIn, you, others }: { item: Extract<TimelineItem, { kind: "followup" }>; due: boolean; busy: boolean; onCheckIn: (answer: CheckIn) => void; you: string; others: string[] }) {
   if (item.stage === "done") return <SystemLine>{item.text}</SystemLine>;
   if (item.stage === "introduced")
     return (
-      <div className="mx-auto flex w-full max-w-md animate-rise flex-col gap-1 rounded-2xl bg-live-soft px-4 py-3 text-live-ink">
-        <span className="font-mono text-[11px] tracking-wider">INTRODUCED</span>
+      <div className="mx-auto flex w-full max-w-md animate-arrive flex-col items-center gap-2 rounded-2xl bg-live-soft px-4 py-3.5 text-center text-live-ink">
+        <Handoff you={you} others={others} />
+        <span className="font-mono text-[11px] tracking-wider">YOU&apos;RE INTRODUCED</span>
         <p className="text-sm">{item.text}</p>
       </div>
     );
@@ -122,7 +150,7 @@ function FollowUp({ item, due, busy, onCheckIn }: { item: Extract<TimelineItem, 
   );
 }
 
-function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineItem, { kind: "followup" }>; previous: TimelineItem | undefined; showWhy: boolean; you: string; deal: boolean }) {
+function Item({ item, previous, you, deal }: { item: Exclude<TimelineItem, { kind: "followup" }>; previous: TimelineItem | undefined; you: string; deal: boolean }) {
   if (item.kind === "note" || item.kind === "hold") return <SystemLine>{item.text}</SystemLine>;
   if (item.kind === "room")
     return (
@@ -136,7 +164,7 @@ function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineIt
             </span>
           ))}
         </span>
-        {showWhy && <Reasoning>{item.why}</Reasoning>}
+        <Reasoning>{item.why}</Reasoning>
       </div>
     );
   if (item.kind === "outcome")
@@ -160,7 +188,7 @@ function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineIt
         </span>
         {m.amount !== null && m.unit && <span className="font-display text-2xl">{formatPrice(m.amount, m.unit)}</span>}
         <p className="text-sm">{m.text}</p>
-        {showWhy && m.why && <Reasoning>{m.why}</Reasoning>}
+        {m.why && <Reasoning>{m.why}</Reasoning>}
       </div>
     );
   // The person's own words sit on the right, like in any messenger; their agent's messages sit beside them.
@@ -182,7 +210,7 @@ function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineIt
   const bubble = person ? "rounded-tr-md bg-signal text-white" : mine ? "rounded-tr-md bg-ink text-white" : "rounded-tl-md border border-line bg-white";
   return (
     <div className={`flex animate-rise gap-2.5 ${mine ? "flex-row-reverse" : ""}`}>
-      <span className="w-8 shrink-0">{!sameSpeaker && (person ? <Avatar name={you} /> : mine ? <AgentAvatar /> : <Avatar name={m.who.replace(/'s agent$/, "")} />)}</span>
+      <span className="w-8 shrink-0">{!sameSpeaker && (person ? <Avatar name={you} /> : mine ? <AgentAvatar still /> : <AgentAvatar mine={false} owner={m.who.replace(/'s agent$/, "")} still />)}</span>
       <div className={`flex min-w-0 flex-1 flex-col gap-1.5 ${mine ? "items-end" : "items-start"}`}>
         {!sameSpeaker && (
           <span className="flex items-center gap-1.5 text-[13px] font-medium text-slate">
@@ -200,7 +228,7 @@ function Item({ item, previous, showWhy, you, deal }: { item: Exclude<TimelineIt
           {m.card && <CardView card={m.card} mine={mine} />}
           {label && <span className={`mt-1 block font-mono text-[11px] tracking-wide ${mine ? "text-haze" : "text-slate"}`}>{label}</span>}
         </div>
-        {showWhy && m.why && <Reasoning align={mine ? "right" : "left"}>{m.why}</Reasoning>}
+        {m.why && <Reasoning align={mine ? "right" : "left"}>{m.why}</Reasoning>}
       </div>
     </div>
   );
@@ -253,8 +281,6 @@ export function RoomChat(props: {
   live: boolean;
   busy: boolean;
   error: string | null;
-  showWhy: boolean;
-  onToggleWhy: () => void;
   onDecide: (id: string, decision: "approved" | "declined") => void;
   // A yes or no that hasn't been sent yet, with the moment it will be.
   pending: { decision: "approved" | "declined"; until: number } | null;
@@ -271,7 +297,7 @@ export function RoomChat(props: {
   onBack: () => void;
   onDetails: () => void;
 }) {
-  const { thread, opportunity, decision, limit, live, busy, showWhy, pending, stale } = props;
+  const { thread, opportunity, decision, limit, live, busy, pending, stale } = props;
   const now = useNow(pending ? 500 : null);
   // The clock only ticks while something is pending, so clamp to the undo window on the first render.
   const secondsLeft = pending ? Math.min(8, Math.max(1, Math.ceil((pending.until - now) / 1000))) : 0;
@@ -291,14 +317,6 @@ export function RoomChat(props: {
     <section className="flex min-h-0 flex-1 flex-col" aria-label={threadTitle(thread)}>
       <ConversationHeader avatar={<AvatarStack names={thread.others} size={32} />} title={threadTitle(thread)} subtitle={people} onBack={props.onBack}>
         <span className={`hidden rounded-full px-2.5 py-1 font-mono text-[10px] tracking-wide sm:inline ${status.cls}`}>{status.text}</span>
-        <label title="Show each agent's private reasoning" className="flex min-h-10 cursor-pointer items-center gap-2 rounded-full border border-line px-3 text-sm">
-          <input type="checkbox" checked={showWhy} onChange={props.onToggleWhy} className="size-4 accent-ink" aria-label="Show reasoning" />
-          <span className="hidden sm:inline">Reasoning</span>
-          <svg className="sm:hidden" width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="5" y="11" width="14" height="10" rx="2" />
-            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-          </svg>
-        </label>
         <button type="button" onClick={props.onDetails} aria-label="Room details" className="flex min-h-10 min-w-10 items-center justify-center rounded-full border border-line text-sm font-medium hover:border-ink sm:px-3.5 xl:hidden">
           <svg className="sm:hidden" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <circle cx="12" cy="12" r="9" />
@@ -319,17 +337,16 @@ export function RoomChat(props: {
                   : `Your agent found ${thread.who}'s agent`}
             </SystemLine>
             <p className="-mt-2 text-center text-[12px] text-slate">Every agent here is an AI acting for one person. Only messages marked You are a person.</p>
-            {showWhy && (
-              <div className="mx-auto flex flex-col items-center gap-1">
-                <Reasoning>{thread.why}</Reasoning>
-                <span className="text-[12px] text-slate">Lines with a lock are your agent&apos;s notes. Only you see them.</span>
-              </div>
-            )}
+            {/* Each agent's reasoning is always shown: lines with a lock are your agent's notes, for you only. */}
+            <div className="mx-auto flex flex-col items-center gap-1">
+              <Reasoning>{thread.why}</Reasoning>
+              <span className="text-[12px] text-slate">Lines with a lock are your agent&apos;s notes. Only you see them.</span>
+            </div>
             {thread.timeline.map((item, i) =>
               item.kind === "followup" ? (
-                <FollowUp key={i} item={item} due={followupOf(thread, item.opportunityId).checkInDue} busy={busy} onCheckIn={(answer) => props.onCheckIn(item.opportunityId, answer)} />
+                <FollowUp key={i} item={item} due={followupOf(thread, item.opportunityId).checkInDue} busy={busy} onCheckIn={(answer) => props.onCheckIn(item.opportunityId, answer)} you={props.you} others={thread.others} />
               ) : (
-                <Item key={i} item={item} previous={thread.timeline[i - 1]} showWhy={showWhy} you={props.you} deal={deal} />
+                <Item key={i} item={item} previous={thread.timeline[i - 1]} you={props.you} deal={deal} />
               ),
             )}
             <QuickReplies
@@ -375,7 +392,8 @@ export function RoomChat(props: {
               <p className="py-1 text-sm text-slate">Your agent is negotiating. Nothing is agreed until you approve it.</p>
             ) : opportunity ? (
               <>
-                <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                {/* A new proposal, or a new version of one, arrives with a short spring. */}
+                <div key={`${opportunity.id}:${opportunity.version}`} className="flex animate-arrive flex-wrap items-center justify-between gap-x-4 gap-y-1">
                   <span className="flex min-w-0 items-center gap-2">
                     <span className="shrink-0 rounded-full bg-signal-soft px-2 py-0.5 font-mono text-[10px] tracking-wide text-signal-ink">{price ? `PROPOSAL V${opportunity.version}` : "PLAN"}</span>
                     <span className="truncate font-display text-xl">{price ?? opportunity.title}</span>

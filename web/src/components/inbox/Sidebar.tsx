@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { AgentAvatar, AvatarStack } from "./Avatar";
+import { AgentAvatar, AvatarStack, type AgentState } from "./Avatar";
 
 export type ConversationSummary = {
   id: string;
@@ -25,7 +25,7 @@ const TONE = {
   signal: "bg-ink text-white",
 } as const;
 
-function Row({ c, selected, onSelect }: { c: ConversationSummary; selected: boolean; onSelect: () => void }) {
+function Row({ c, selected, onSelect, agentState }: { c: ConversationSummary; selected: boolean; onSelect: () => void; agentState: AgentState }) {
   return (
     <li>
       <button
@@ -34,7 +34,7 @@ function Row({ c, selected, onSelect }: { c: ConversationSummary; selected: bool
         aria-current={selected ? "true" : undefined}
         className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors ${selected ? "bg-paper" : "hover:bg-paper/70"}`}
       >
-        {c.kind === "agent" ? <AgentAvatar size={40} /> : <AvatarStack names={c.people} size={32} />}
+        {c.kind === "agent" ? <AgentAvatar size={40} state={agentState} still /> : <AvatarStack names={c.people} size={32} />}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="flex items-center justify-between gap-2">
             <span className={`truncate ${c.unread ? "font-semibold" : "font-medium"}`}>{c.title}</span>
@@ -76,7 +76,9 @@ export function Sidebar({
   onSelect,
   query,
   onQuery,
+  agentState = "idle",
 }: {
+  agentState?: AgentState;
   conversations: ConversationSummary[];
   selected: string | null;
   onSelect: (id: string) => void;
@@ -92,7 +94,7 @@ export function Sidebar({
   const needs = conversations.filter((c) => c.needs && matches(c));
   const waiting = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "waiting" && matches(c));
   const done = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "done" && matches(c));
-  const row = (c: ConversationSummary) => <Row key={c.id} c={c} selected={selected === c.id} onSelect={() => onSelect(c.id)} />;
+  const row = (c: ConversationSummary) => <Row key={c.id} c={c} selected={selected === c.id} onSelect={() => onSelect(c.id)} agentState={agentState} />;
   const heading = (text: string) => <h2 className="px-3 pb-1 pt-4 font-mono text-[11px] tracking-wider text-slate">{text}</h2>;
   return (
     <nav aria-label="Conversations" className="flex min-h-0 flex-1 flex-col">

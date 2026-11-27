@@ -41,6 +41,8 @@ export type PrivacyControls = {
   onReach?: (policy: "ask" | "matched") => void;
   onAnswer?: (id: string, answer: "approve" | "deny" | "block") => void;
   onUnblock?: (agent: string) => void;
+  // Deletes the agent and everything it holds (it asks first).
+  onDeleteAll?: () => void;
 };
 
 // Who can reach the agent: strangers waiting for an answer first, then the setting and anyone blocked.
@@ -359,6 +361,11 @@ export function AgentPanel({
           <a href="/api/session/export" download className="min-h-9 underline underline-offset-2">
             Download my data
           </a>
+          {privacy.onDeleteAll && (
+            <button type="button" onClick={privacy.onDeleteAll} className="min-h-9 text-signal-ink underline underline-offset-2">
+              Delete my agent
+            </button>
+          )}
           <a href="/privacy" className="min-h-9 text-slate underline underline-offset-2 hover:text-ink">
             Privacy and your rights
           </a>

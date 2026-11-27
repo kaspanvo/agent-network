@@ -7,7 +7,7 @@ import type { Opportunity, Outcome } from "@/server/negotiation/types";
 import { formatPrice, isInterest, lowerFirst } from "@/server/domain";
 import { RECAP_CHANGE, RECAP_CONFIRMED } from "@/server/intake/types";
 import { ChoicesWidget, NumberWidget, PairsWidget, RecapWidget } from "../start/Widgets";
-import { AgentAvatar, AvatarStack } from "./Avatar";
+import { AGENT_STATE_WORDS, AgentAvatar, AvatarStack, type AgentState } from "./Avatar";
 import { ConversationHeader, Dots, JumpToLatest, QuickReplies, useStickToBottom } from "./ChatFrame";
 import { Composer } from "./Composer";
 import { priceOf, statusOf, threadTitle, type RunState, type Shortlist } from "./runState";
@@ -151,6 +151,8 @@ export function AgentChat(props: {
   understanding: { agreed: number; total: number; betterThanChance: boolean } | null;
   onBack: () => void;
   onDetails: () => void;
+  // What the agent is doing, shown by its avatar.
+  agentState: AgentState;
 }) {
   const { chat, intents, ready, busy, error, run, running } = props;
   const lastText = chat.at(-1)?.text.length ?? 0;
@@ -174,7 +176,7 @@ export function AgentChat(props: {
   return (
     <section className="flex min-h-0 flex-1 flex-col" aria-label="Your agent">
       <ConversationHeader
-        avatar={<AgentAvatar size={36} />}
+        avatar={<AgentAvatar size={40} state={props.agentState} label={`Your agent: ${AGENT_STATE_WORDS[props.agentState]}`} />}
         title={
           <span className="flex items-center gap-1.5">
             Your agent
@@ -213,7 +215,8 @@ export function AgentChat(props: {
                 </p>
               ) : (
                 <article key={item.id} data-ai-generated="true" className="group flex animate-rise gap-3">
-                  <AgentAvatar />
+                  {/* Only the message being written moves; the rest of the conversation stays still. */}
+                  <AgentAvatar state={!item.text && !item.stopped ? "learning" : "idle"} still={!!item.text || index < chat.length - 1} />
                   <div className="flex min-w-0 flex-1 flex-col gap-3">
                     {item.text ? <p className="whitespace-pre-wrap pt-1 text-[17px] leading-relaxed">{item.text}</p> : !item.stopped && <Dots label="Your agent is typing" />}
                     {item.stopped && <span className="font-mono text-[11px] tracking-wider text-slate">STOPPED</span>}
@@ -262,7 +265,7 @@ export function AgentChat(props: {
 
             {awaitingAgent && (
               <div className="flex gap-3">
-                <AgentAvatar />
+                <AgentAvatar state="learning" />
                 <Dots label="Your agent is typing" />
               </div>
             )}
