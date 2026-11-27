@@ -105,6 +105,8 @@ export function useIntake() {
     try {
       setIntents((await api.setMandate(id, price, days)).intents);
     } catch (err) {
+      // Saving the agent or confirming it's you is handled by the page, which retries.
+      if (err instanceof ApiError && (err.needs === "reauth" || err.needs === "account")) throw err;
       setError((err as Error).message);
     }
   };

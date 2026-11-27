@@ -5,7 +5,7 @@ import type { PublicSession } from "@/server/store";
 
 // `turnstile` is the site key when starting a session needs Cloudflare's bot check.
 // `resting` is true when today's AI budget is spent and the simple script answers for everyone until 00:00 UTC.
-export type SessionResponse = { mode: AgentMode; model: string | null; resting: boolean; busy: string | null; turnstile: string | null; session: PublicSession | null };
+export type SessionResponse = { mode: AgentMode; model: string | null; resting: boolean; busy: string | null; turnstile: string | null; account: { url: string; publishableKey: string } | null; session: PublicSession | null };
 
 // A refusal from the server: its words for the person, and `needs` when the app can fix it itself ("recap").
 export class ApiError extends Error {
@@ -84,6 +84,12 @@ export const api = {
   session: () => fetch("/api/session", { cache: "no-store" }).then(json<SessionResponse>),
   // `adult`: the person said they're 18 or over.
   start: (name: string, turnstile: string | undefined, adult: boolean) => post("/api/session", { name, adult, ...(turnstile ? { turnstile } : {}) }).then(json<SessionResponse>),
+  // Everything the agent holds, as a file (a saved agent asks for a fresh sign-in first).
+  exportData: async (): Promise<Blob> => {
+    const response = await fetch("/api/session/export");
+    if (!response.ok) throw await refusal(response);
+    return response.blob();
+  },
   // Deletes the agent and everything it holds.
   reset: () => fetch("/api/session", { method: "DELETE" }).then(json<{ ok: true }>),
   // Forgetting removes every copy in storage; each returns the session as it now is.

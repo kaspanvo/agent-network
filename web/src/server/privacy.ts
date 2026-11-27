@@ -1,7 +1,7 @@
 import { lowerFirst, profileOf } from "./domain";
 import { isReady } from "./intake/profile";
 import { circleId } from "./rooms/circle";
-import { RETENTION_DAYS } from "./retention";
+import { RETENTION_DAYS, SAVED_RETENTION_DAYS } from "./retention";
 import { entryHash, type Session } from "./store";
 
 // The person's rights over what their agent holds, done in storage rather than by asking the model: a 2026 study of
@@ -17,7 +17,7 @@ export function lastSeen(session: Session): number {
 }
 
 export function expiresAt(session: Session): number {
-  return lastSeen(session) + RETENTION_DAYS * DAY;
+  return lastSeen(session) + (session.owner ? SAVED_RETENTION_DAYS : RETENTION_DAYS) * DAY;
 }
 
 export function expired(session: Session, now = Date.now()): boolean {

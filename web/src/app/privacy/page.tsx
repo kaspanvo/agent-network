@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Brand } from "@/components/Brand";
 import { PrivacyRequestForm } from "@/components/PrivacyRequestForm";
-import { RETENTION_DAYS } from "@/server/retention";
+import { RETENTION_DAYS, SAVED_RETENTION_DAYS } from "@/server/retention";
 
 export const metadata: Metadata = { title: "Privacy · Open" };
 
@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Privacy · Open" };
 // until then the page says plainly that it's missing.
 const CONTROLLER = process.env.NEXT_PUBLIC_OPEN_CONTROLLER?.trim() || null;
 const CONTACT = process.env.NEXT_PUBLIC_OPEN_PRIVACY_CONTACT?.trim() || null;
-const UPDATED = "26 November 2026";
+const UPDATED = "27 November 2026";
 
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
   return (
@@ -68,6 +68,7 @@ export default function PrivacyPage() {
         <Section id="what" title="What your agent keeps">
           <ul className="flex list-disc flex-col gap-1.5 pl-5">
             <li>The first name you give it, and that you said you&apos;re 18 or over.</li>
+            <li>If you save your agent to an account: your email address, the public half of any passkey you add, and when you signed in. Open never sees a password or your passkey itself.</li>
             <li>Your conversation with it, and the AI model&apos;s own copy of that conversation.</li>
             <li>What you&apos;re looking for and could offer, with your private price limits, times and preferences.</li>
             <li>Notes it made about you, each with the words they came from, and how well it guessed your either/or picks.</li>
@@ -101,6 +102,9 @@ export default function PrivacyPage() {
             <li>
               <strong>Anthropic</strong> runs the agents when Open uses Claude. Each agent says which model it runs on.
             </li>
+            <li>
+              <strong>Supabase</strong> handles accounts if you save your agent: your email, sign-in codes and passkeys. Your agent and what it knows stay with Cloudflare.
+            </li>
           </ul>
           <p>Both are based in the United States and handle data under their data processing terms, including the safeguards those terms set for transfers outside the EU. Neither may use it for anything but providing their service to Open.</p>
         </Section>
@@ -108,7 +112,7 @@ export default function PrivacyPage() {
         <Section id="how-long" title={"How long it's kept"}>
           <ul className="flex list-disc flex-col gap-1.5 pl-5">
             <li>
-              Your agent and everything it holds are <strong>deleted {RETENTION_DAYS} days after your last visit</strong>. Each visit restarts the count.
+              Your agent and everything it holds are <strong>deleted {RETENTION_DAYS} days after your last visit</strong>. Each visit restarts the count. An agent you saved to an account is kept for {SAVED_RETENTION_DAYS / 365 === 1 ? "a year" : `${SAVED_RETENTION_DAYS} days`} after your last visit instead.
             </li>
             <li>
               <strong>Start over</strong> deletes your agent at once. <strong>Forget</strong>, on anything in your profile, removes it and every copy of your words about it, including the AI model&apos;s copy of your conversation.

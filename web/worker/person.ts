@@ -1,5 +1,7 @@
 import { Agent } from "agents";
-import { makeActor, observe, persist, broadcast, type Actor } from "../src/server/actor";
+import { makeActor, observe, persist, record, broadcast, type Actor } from "../src/server/actor";
+import { identify, type Who } from "../src/server/account";
+import type { AgentInfo } from "../src/server/accountRoutes";
 import { handleApi, keepLookingNow, type Host } from "../src/server/api";
 import { checkInDue } from "../src/server/followup";
 import { lapse, type Wake } from "../src/server/holds";
@@ -45,6 +47,9 @@ export class PersonAgent extends Agent<Env> {
   // Deletes the person's data at once, then the rest of the object (its scheduled wakes, the SDK's own tables) in a
   // fresh alarm invocation of its own, so the teardown can't be cut short by the request that asked for it ending.
   private async erase() {
+    // A saved agent's account forgets it too, so the next sign-in starts fresh.
+    const owner = this.actor?.session.owner;
+    if (owner) await this.env.ACCOUNTS.getByName(owner.sub).clear(this.name);
     void this.sql`DELETE FROM session_parts`;
     this.actor = undefined;
     await this.schedule(1, "selfDestruct");
@@ -52,6 +57,29 @@ export class PersonAgent extends Agent<Env> {
 
   async selfDestruct() {
     await this.destroy();
+  }
+
+  // For linking accounts, from the Worker: does this agent exist, whose is it, has anything happened in it.
+  async accountInfo(): Promise<AgentInfo> {
+    const actor = this.actor;
+    return { exists: !!actor, owner: actor?.session.owner?.sub ?? null, started: !!actor && actor.session.chat.length > 0 };
+  }
+
+  // Saves this agent to an account. Only an agent nobody owns yet, or one already theirs.
+  async claim(who: Who): Promise<void> {
+    const actor = this.actor;
+    if (!actor) throw new Error("No such agent.");
+    if (actor.session.owner && actor.session.owner.sub !== who.sub) throw new Error("This agent belongs to another account.");
+    if (!actor.session.owner) {
+      actor.session.owner = { sub: who.sub, ...(who.email ? { email: who.email } : {}), linkedAt: new Date().toISOString() };
+      record(actor, { kind: "you", by: "you", text: `You saved your agent to your account${who.email ? ` (${who.email})` : ""}` });
+      persist(actor);
+    }
+  }
+
+  // Deletes this agent when its person chose to keep another one instead.
+  async eraseForAccount(): Promise<void> {
+    await this.erase();
   }
 
   // A message from another person's agent, delivered Durable Object to Durable Object (never through the public API).
@@ -107,6 +135,8 @@ export class PersonAgent extends Agent<Env> {
       market: this.market(),
       privacyRequests: (r) => this.env.MARKET.getByName(COMMUNITY).keepPrivacyRequest(r),
       erase: () => this.erase(),
+      identify: (request) => identify(request),
+      directory: { get: (sub) => this.env.ACCOUNTS.getByName(sub).get(), set: (sub, agentId) => this.env.ACCOUNTS.getByName(sub).set(agentId) },
       counter: this.counter,
       agents: agentModels(browserRunSource(this.env.BROWSER), this.env.AI, this.counter),
       // A Durable Object alarm wakes this agent when a proposal's hold runs out or it's time to ask how it went,

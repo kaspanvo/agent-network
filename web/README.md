@@ -119,6 +119,24 @@ npx wrangler secret put ANTHROPIC_API_KEY
 
 or, so the Worker holds no key at all, store the Anthropic key in an AI Gateway (dashboard → AI → AI Gateway → create `open` → Provider keys) and set these Worker variables: `OPEN_AI_GATEWAY_URL=https://gateway.ai.cloudflare.com/v1/<account id>/open/anthropic` and `OPEN_AI_GATEWAY_BYOK=true` (plus the secret `CF_AIG_TOKEN` if the gateway requires authentication). Every call is then logged, retried and tagged with its role (`cf-aig-metadata`), never with anything about the person.
 
+### Accounts (Supabase Auth)
+
+People try Open anonymously. Saving the agent to an account (an emailed 6-digit code, then a passkey) keeps it if the browser forgets them, opens it on their other devices, and is required before a standing yes. The browser signs in with Supabase; the Worker checks Supabase's signed access token locally against the project's published keys (`src/server/account.ts`, with `jose`), so no request waits on Supabase. Which agent an account owns lives in a small `AccountDirectory` Durable Object per account (`worker/accounts.ts`). A saved agent answers only its own account, and exporting, deleting, a standing yes, consent to share something sensitive, and who can reach the agent all need a sign-in from the last 10 minutes (passkey or code). Signing in on a device that already has an anonymous agent with a conversation asks which to keep. Saved agents are kept a year after the last visit; anonymous ones 30 days.
+
+Off until both are set (unset, everything stays anonymous as before):
+
+- `OPEN_SUPABASE_URL` and `OPEN_SUPABASE_PUBLISHABLE_KEY` as Worker variables (both public by design), or in `.env.local` for `npm run dev`.
+
+Dashboard steps in the Supabase project, before switching it on:
+
+1. **Region:** check it's an EU region (Project Settings → General). A project's region can't be changed.
+2. **Asymmetric signing keys:** Project Settings → JWT Keys → switch to the new signing keys, so the Worker can verify tokens from the JWKS endpoint.
+3. **Email:** Authentication → SMTP → a custom sender (the built-in one allows 2 emails an hour). Authentication → Email Templates → "Magic Link": include `{{ .Token }}` so people get a 6-digit code.
+4. **Passkeys:** Authentication → Sign In / Providers → enable Passkeys, with the relying party set to Open's permanent domain (changing it later breaks every passkey).
+5. **URLs:** Authentication → URL Configuration → add Open's domain (and `http://localhost:3000` for development).
+6. **Bot check:** Authentication → Attack Protection → CAPTCHA with Cloudflare Turnstile (Open's own Turnstile widget then needs to pass its token to `signInWithOtp`).
+7. Plan: the free plan pauses inactive projects after a week and lacks session time limits, so use Pro for real members.
+
 ### Limits and cost controls
 
 Everything that costs money has a ceiling, in layers, the way metered AI platforms do it (`src/server/limits.ts`, `worker/budget.ts`):

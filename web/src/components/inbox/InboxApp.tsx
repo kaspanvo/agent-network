@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { api } from "@/lib/client";
+import { accounts, link } from "@/lib/account";
+import { api, ApiError } from "@/lib/client";
+import { AccountSection } from "../account/AccountSection";
+import { SignIn } from "../account/SignIn";
 import type { AgentMode } from "@/server/pace";
 import type { PublicSession } from "@/server/store";
 import { AppHeader } from "../AppHeader";
@@ -67,6 +70,14 @@ export function InboxApp() {
   const [adult, setAdult] = useState(false);
   // Looking at a simulated member's inbox, opened from the Simulation page.
   const [synthetic, setSynthetic] = useState(false);
+  // Accounts (Supabase): switched on or not, which email the agent is saved to, and the three moments they need the
+  // person: signing in to reach a saved agent, choosing between two agents, and confirming it's them.
+  const [accountOn, setAccountOn] = useState(false);
+  const [savedTo, setSavedTo] = useState<string | null>(null);
+  const [gate, setGate] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [reauth, setReauth] = useState<{ resolve: () => void; reject: (err: Error) => void } | null>(null);
+  const [signingIn, setSigningIn] = useState(false);
 
   const { run, running, busyRoom, decisions } = runs;
   // The agent is out on a run, as opposed to streaming one room's replies, a yes, or a check-in.
@@ -85,8 +96,11 @@ export function InboxApp() {
   useEffect(() => {
     const onPop = () => setSelected(urlConversation());
     window.addEventListener("popstate", onPop);
-    api
-      .session()
+    // A saved session is restored (and refreshed) before the first request, so a returning person isn't asked to sign in.
+    accounts()
+      .then((client) => setAccountOn(!!client))
+      .catch(() => {})
+      .then(() => api.session())
       .then(({ mode, model, resting, busy, turnstile, session }) => {
         setMode(mode);
         setModel(model);
@@ -94,6 +108,7 @@ export function InboxApp() {
         setTurnstileKey(turnstile);
         if (!session) return;
         setName(session.name);
+        setSavedTo(session.owner?.email ?? (session.owner ? "your account" : null));
         setSynthetic(session.synthetic);
         setTrust(trustOf(session));
         intake.load(session);
@@ -104,7 +119,11 @@ export function InboxApp() {
         for (const e of session.run?.events ?? []) if ("threadId" in e && e.type !== "discover") counts[e.threadId] = (counts[e.threadId] ?? 0) + 1;
         setSeen(counts);
       })
-      .catch((err: Error) => intake.setError(err.message))
+      .catch((err: Error) => {
+        // A saved agent and no signed-in account on this device: ask them to sign in.
+        if (err instanceof ApiError && err.needs === "signin") setGate(true);
+        else intake.setError(err.message);
+      })
       .finally(() => setLoaded(true));
     return () => window.removeEventListener("popstate", onPop);
     // Load once on mount.
@@ -208,11 +227,55 @@ export function InboxApp() {
     if (session) intake.load(session);
   };
 
+  // After signing in: save this device's agent, open the account's agent here, or ask which to keep.
+  const afterSignIn = async (choose?: "this" | "saved") => {
+    try {
+      const status = await link(choose);
+      if (status === "conflict") return setConflict(true);
+      if (status === "none") {
+        // Signed in, nothing saved yet and nothing here: the agent they start now is saved to their account.
+        setGate(false);
+        setSigningIn(false);
+        return;
+      }
+      window.location.reload();
+    } catch (err) {
+      intake.setError((err as Error).message);
+    }
+  };
+
+  // Runs something sensitive; if a saved agent wants a fresh sign-in first, asks for it and tries again.
+  const fresh = async <T,>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (err) {
+      if (err instanceof ApiError && err.needs === "account") {
+        setDetailsOpen(true);
+        throw new Error("Save your agent to an account first: it's in your profile.");
+      }
+      if (!(err instanceof ApiError) || err.needs !== "reauth") throw err;
+      await new Promise<void>((resolve, reject) => setReauth({ resolve, reject }));
+      return work();
+    }
+  };
+
+  const exportData = async () => {
+    try {
+      const blob = await fresh(() => api.exportData());
+      const url = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement("a"), { href: url, download: `open-my-data-${new Date().toISOString().slice(0, 10)}.json` });
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      intake.setError((err as Error).message);
+    }
+  };
+
   // Start over deletes the agent and everything it holds, so it asks first.
   const startOver = async () => {
     if (!window.confirm("Start over deletes your agent and everything it knows about you, right now: your conversation, limits, rooms and activity log. Download a copy first if you want one. This can't be undone.")) return;
     try {
-      await api.reset();
+      await fresh(() => api.reset());
     } catch (err) {
       intake.setError((err as Error).message);
       return;
@@ -242,9 +305,10 @@ export function InboxApp() {
       if (!window.confirm("Forget this note? Your agent deletes it and every copy of your words about it. This can't be undone.")) return;
       void privately(() => api.forgetNote(id));
     },
-    onConsent: (id: string, share: boolean) => void privately(() => api.consent(id, share)),
+    onConsent: (id: string, share: boolean) => void privately(() => fresh(() => api.consent(id, share))),
     reach: trust.reach,
-    onReach: (policy: "ask" | "matched") => void privately(() => api.setReach(policy)),
+    onReach: (policy: "ask" | "matched") => void privately(() => fresh(() => api.setReach(policy))),
+    onExport: () => void exportData(),
     onAnswer: (id: string, answer: "approve" | "deny" | "block") => void privately(() => api.answerRequest(id, answer)),
     onUnblock: (agent: string) => void privately(() => api.unblock(agent)),
     onDeleteAll: () => void startOver(),
@@ -350,10 +414,71 @@ export function InboxApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intake.chat, intake.intents, intake.ready, intake.busy, run, running, busyRoom, decisions, seen, current, pending, trust.stale]);
 
+  // Two account moments that can come up on any screen: choosing between two agents, and confirming it's you.
+  const overlays = (
+    <>
+      {conflict && (
+        <div role="dialog" aria-modal="true" aria-labelledby="conflict-title" className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
+          <div className="flex w-full max-w-md flex-col gap-3 rounded-2xl bg-white p-5">
+            <h2 id="conflict-title" className="font-display text-xl">You have two agents</h2>
+            <p className="text-sm text-slate">There&apos;s an agent saved to your account, and another one on this device with its own conversation. Which should you keep?</p>
+            <button type="button" onClick={() => void afterSignIn("saved")} className="min-h-11 rounded-full bg-ink px-5 text-sm font-semibold text-white">
+              Open my saved agent
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm("Keep the agent on this device and delete the one saved to your account? This can't be undone.")) void afterSignIn("this");
+              }}
+              className="min-h-11 rounded-full border border-line px-5 text-sm"
+            >
+              Keep this one instead (deletes the saved one)
+            </button>
+          </div>
+        </div>
+      )}
+      {reauth && (
+        <div role="dialog" aria-modal="true" aria-label="Confirm it's you" className="fixed inset-0 z-50 flex items-end justify-center bg-ink/40 p-4 sm:items-center">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5">
+            <SignIn
+              mode="confirm"
+              onDone={() => {
+                reauth.resolve();
+                setReauth(null);
+              }}
+              onCancel={() => {
+                reauth.reject(new Error("Cancelled. Nothing changed."));
+                setReauth(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   if (!loaded)
     return (
       <div className="flex h-dvh flex-col">
         <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
+      </div>
+    );
+
+  // A saved agent, and no signed-in account on this device.
+  if (gate)
+    return (
+      <div className="flex min-h-dvh flex-col">
+        <AppHeader label="YOUR INBOX" mode={mode} resting={resting} />
+        <main className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center gap-5 px-4 py-10">
+          <AgentAvatar size={64} state="idle" />
+          <SignIn mode="signin" onDone={() => void afterSignIn()} />
+          {intake.error && (
+            <p role="alert" className="text-sm text-signal-ink">
+              {intake.error}
+            </p>
+          )}
+        </main>
+        {overlays}
       </div>
     );
 
@@ -405,7 +530,18 @@ export function InboxApp() {
               {intake.error}
             </p>
           )}
+          {accountOn &&
+            (signingIn ? (
+              <div className="rounded-2xl border border-line bg-white p-4">
+                <SignIn mode="signin" onDone={() => void afterSignIn()} onCancel={() => setSigningIn(false)} />
+              </div>
+            ) : (
+              <button type="button" onClick={() => setSigningIn(true)} className="min-h-10 self-start text-sm text-slate underline underline-offset-2 hover:text-ink">
+                Already saved an agent? Sign in
+              </button>
+            ))}
         </main>
+        {overlays}
       </div>
     );
 
@@ -416,6 +552,8 @@ export function InboxApp() {
   const agentState: AgentState = out ? "negotiating" : intake.busy ? "learning" : needing.length ? "needs" : run.threads.length ? "done" : "idle";
   const waitingRooms = conversations.filter((c) => c.kind === "room" && !c.needs && c.section === "waiting").length;
   const doneRooms = conversations.filter((c) => c.kind === "room" && c.section === "done").length;
+  // Worth saving once there's a conversation to lose.
+  const unsaved = accountOn && !savedTo && intake.chat.length > 2;
   const dayWords = (iso: string) => new Date(iso).toLocaleDateString(undefined, { weekday: "long" });
   const home = {
     state: agentState,
@@ -435,6 +573,7 @@ export function InboxApp() {
       ...(waitingRooms ? [`${waitingRooms} room${waitingRooms === 1 ? "" : "s"} waiting on others`] : []),
       ...(doneRooms ? [`${doneRooms} done`] : []),
       ...(trust.keepLooking ? [`Looks again ${dayWords(trust.keepLooking.next)}`] : []),
+      ...(unsaved ? ["Not saved to an account yet: this browser is its only key"] : []),
     ],
     action:
       agentState === "needs"
@@ -443,7 +582,9 @@ export function InboxApp() {
           ? { label: "Send my agent out", onClick: () => void sendOut() }
           : agentState === "idle" && !intake.ready
             ? { label: "Talk to your agent", onClick: () => select(AGENT) }
-            : null,
+            : unsaved
+              ? { label: "Save my agent", onClick: () => setDetailsOpen(true) }
+              : null,
   };
   const offer = thread ? run.opportunities.find((o) => o.threadId === thread.id) : undefined;
 
@@ -553,7 +694,8 @@ export function InboxApp() {
                   intents={intake.intents}
                   goals={intake.goals}
                   about={intake.about}
-                  mandate={{ onSet: (id, price, days) => void intake.setMandate(id, price, days), onDrop: (id) => void intake.dropMandate(id) }}
+                  mandate={{ onSet: (id, price, days) => void fresh(() => intake.setMandate(id, price, days)).catch((err: Error) => intake.setError(err.message)), onDrop: (id) => void intake.dropMandate(id) }}
+                  account={accountOn ? <AccountSection savedTo={savedTo} onSaved={() => void afterSignIn()} onSignedOut={() => window.location.reload()} /> : null}
                   ready={intake.ready}
                   threads={run.threads}
                   activeId={run.activeId}
@@ -577,6 +719,7 @@ export function InboxApp() {
         </aside>
       </div>
 
+      {overlays}
       <div aria-live="polite" className="pointer-events-none fixed inset-x-4 bottom-24 z-40 flex justify-center sm:inset-x-auto sm:right-6 sm:justify-end">
         {toast && (
           <div className="pointer-events-auto flex animate-rise items-center gap-3 rounded-2xl bg-ink py-2.5 pl-4 pr-2.5 text-sm text-white shadow-xl">

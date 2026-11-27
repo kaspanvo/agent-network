@@ -22,6 +22,7 @@ import { openPrivateRoom, sayInRoom } from "./rooms/reply";
 import { isClosed, tidyRooms } from "./rooms/settle";
 import { covers, makeMandate, mandateWords } from "./mandate";
 import { memberByName } from "./population";
+import { accountConfig, isFresh, type Directory, type Who } from "./account";
 import { exportOf, forgetIntent, forgetNote, RETENTION_DAYS, touch } from "./privacy";
 import { answer, reachOf, unblock } from "./reach";
 import { SENSITIVE_WORDS } from "./sensitive";
@@ -47,6 +48,11 @@ export type Host = {
   // Deletes the person's agent and everything it holds, now: the Durable Object's storage and alarms on Cloudflare,
   // the file locally.
   erase?: () => Promise<void>;
+  // Who's asking, from a verified Supabase token (accounts on), and where accounts point at their agents.
+  identify?: (request: Request) => Promise<Who | null>;
+  directory?: Directory;
+  // Set by handleApi for this request.
+  who?: Who | null;
 };
 
 export const PrivacyRequest = z.object({
@@ -78,7 +84,7 @@ export function crossSite(request: Request): Response | null {
   return null;
 }
 
-function sessionCookie(request: Request, value: string, maxAge: number): string {
+export function sessionCookie(request: Request, value: string, maxAge: number): string {
   const secure = new URL(request.url).protocol === "https:" ? "; Secure" : "";
   return `${SESSION_COOKIE}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
@@ -132,6 +138,12 @@ export async function handleApi(incoming: Request, host: Host): Promise<Response
     request = new Request(incoming.url, { method: incoming.method, headers: incoming.headers, body: text || null });
   }
   const path = new URL(request.url).pathname;
+  host.who = host.identify ? await host.identify(request) : null;
+  // A saved agent answers only its own account. Starting a new agent is the one thing that doesn't need it.
+  const owner = host.actor?.session.owner;
+  const starting = request.method === "POST" && path === "/api/session";
+  if (owner && !starting && host.who?.sub !== owner.sub)
+    return Response.json({ error: "This agent is saved to an account. Sign in to reach it.", needs: "signin" }, { status: 401 });
   for (const route of routes) {
     const match = route.pattern.exec(path);
     if (!match) continue;
@@ -139,6 +151,12 @@ export async function handleApi(incoming: Request, host: Host): Promise<Response
     return route.handle(request, host, match.slice(1).map(decodeURIComponent));
   }
   return routes.some((r) => r.pattern.test(path)) ? jsonError("Method not allowed.", 405) : jsonError("Not found.", 404);
+}
+
+// Sensitive actions on a saved agent need a sign-in from the last few minutes. Null means go ahead.
+function freshEnough(host: Host): Response | null {
+  if (!host.actor?.session.owner || isFresh(host.who)) return null;
+  return Response.json({ error: "Confirm it's you first: sign in again.", needs: "reauth" }, { status: 403 });
 }
 
 // One use of the person's daily quota, saved with their session. Returns the refusal, or null to go ahead.
@@ -160,7 +178,7 @@ async function sessionBody(host: Host, actor: Actor | undefined) {
   // `busy` tells a reopened page that the agent is still out, so it can follow the run live.
   // `turnstile` is the site key when new sessions need a bot check.
   const resting = await agents.resting().catch(() => false);
-  return { mode: agents.mode, model: agents.label, resting, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), session: actor ? publicSession(actor.session) : null };
+  return { mode: agents.mode, model: agents.label, resting, busy: actor?.busy ?? null, turnstile: turnstileSiteKey(), account: accountConfig(), session: actor ? publicSession(actor.session) : null };
 }
 
 async function getSession(request: Request, host: Host) {
@@ -201,14 +219,22 @@ async function startSession(request: Request, host: Host) {
   const counter = host.counter ?? localCounter;
   if (!(await counter.take(await addressKey(request), DAILY.sessionsPerIp))) return jsonError("You've started several agents today. Come back tomorrow, or keep using the one you have.", 429);
   if (!(await counter.take("sessions", DAILY.sessions))) return jsonError("Open is full for today. Try again tomorrow.", 429);
+  // Signed in already, with a saved agent elsewhere: open that one instead of making a second.
+  if (host.who && host.directory && (await host.directory.get(host.who.sub))) return Response.json({ error: "You already have a saved agent.", needs: "switch" }, { status: 409 });
   const actor = host.start(input.name);
   actor.session.adultAt = new Date().toISOString();
+  if (host.who) {
+    actor.session.owner = { sub: host.who.sub, ...(host.who.email ? { email: host.who.email } : {}), linkedAt: new Date().toISOString() };
+    await host.directory?.set(host.who.sub, actor.session.id);
+  }
   persist(actor);
   return Response.json(await sessionBody(host, actor), { headers: { "Set-Cookie": sessionCookie(request, actor.session.id, RETENTION_DAYS * 24 * 60 * 60) } });
 }
 
 // "Start over" deletes the agent and everything it holds, not just the cookie: right to erasure (GDPR Art. 17).
 async function endSession(request: Request, host: Host) {
+  const stale = freshEnough(host);
+  if (stale) return stale;
   if (host.actor?.busy) return jsonError("Your agent is still out. Wait for it to come back, then delete it.", 409);
   if (host.actor && host.erase) await host.erase();
   return Response.json({ ok: true, deleted: !!host.actor }, { headers: { "Set-Cookie": sessionCookie(request, "", 0) } });
@@ -217,6 +243,8 @@ async function endSession(request: Request, host: Host) {
 function exportSession(_request: Request, host: Host) {
   const actor = host.actor;
   if (!actor) return jsonError("There's no agent to export.", 401);
+  const stale = freshEnough(host);
+  if (stale) return stale;
   const day = new Date().toISOString().slice(0, 10);
   return new Response(JSON.stringify(exportOf(actor.session), null, 2), {
     headers: { "Content-Type": "application/json; charset=utf-8", "Content-Disposition": `attachment; filename="open-my-data-${day}.json"`, "Cache-Control": "no-store" },
@@ -250,6 +278,8 @@ async function forgetNoteRoute(_request: Request, host: Host, [id]: string[]) {
 async function setReach(request: Request, host: Host) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const stale = freshEnough(host);
+  if (stale) return stale;
   const input = await body(request, z.object({ policy: z.enum(["ask", "matched"]) }));
   if (!input) return jsonError("Choose who can reach your agent.", 400);
   const reach = reachOf(actor.session);
@@ -289,6 +319,8 @@ function unblockRoute(_request: Request, host: Host, [agent]: string[]) {
 function giveConsent(_request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  const stale = freshEnough(host);
+  if (stale) return stale;
   const intent = actor.session.intents.find((i) => i.id === id);
   if (!intent) return jsonError("That intent no longer exists.", 404);
   if (!intent.sensitive) return jsonError("This one doesn't need your agreement.", 400);
@@ -524,6 +556,10 @@ export async function keepLookingNow(actor: Actor, host: Host): Promise<void> {
 async function setMandate(request: Request, host: Host, [id]: string[]) {
   const actor = host.actor;
   if (!actor) return jsonError("Your session has ended. Start again.", 401);
+  // Letting the agent say yes for you is for saved agents only, with a fresh sign-in.
+  if (accountConfig() && !actor.session.owner) return Response.json({ error: "Save your agent to an account first.", needs: "account" }, { status: 403 });
+  const stale = freshEnough(host);
+  if (stale) return stale;
   const input = await body(request, z.object({ price: z.number().finite().nonnegative().max(100000), days: z.number().int() }));
   if (!input) return jsonError("Choose a price and how long.", 400);
   const intent = actor.session.intents.find((i) => i.id === id);

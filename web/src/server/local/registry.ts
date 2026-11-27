@@ -1,4 +1,8 @@
-import { makeActor, type Actor } from "../actor";
+import { makeActor, persist, record, type Actor } from "../actor";
+import type { Directory, Who } from "../account";
+import type { AgentInfo } from "../accountRoutes";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createSession } from "../store";
 import { deleteSession, loadSession, saveSession } from "./files";
 
@@ -44,4 +48,46 @@ export function startActor(name: string): Actor {
 export async function eraseActor(id: string): Promise<void> {
   actors.delete(id);
   deleteSession(id);
+}
+
+// Which agent each account owns, in a file, standing in for the account Durable Objects.
+const ACCOUNTS = () => join(process.cwd(), ".data", "accounts.json");
+function readAccounts(): Record<string, string> {
+  try {
+    return existsSync(ACCOUNTS()) ? (JSON.parse(readFileSync(ACCOUNTS(), "utf8")) as Record<string, string>) : {};
+  } catch {
+    return {};
+  }
+}
+export const localDirectory: Directory = {
+  get: async (sub) => readAccounts()[sub] ?? null,
+  set: async (sub, agentId) => {
+    mkdirSync(join(process.cwd(), ".data"), { recursive: true, mode: 0o700 });
+    writeFileSync(ACCOUNTS(), JSON.stringify({ ...readAccounts(), [sub]: agentId }), { mode: 0o600 });
+  },
+};
+
+export async function localAgentInfo(id: string): Promise<AgentInfo> {
+  const actor = actorFor(id);
+  return { exists: !!actor, owner: actor?.session.owner?.sub ?? null, started: !!actor && actor.session.chat.length > 0 };
+}
+
+export async function localClaim(id: string, who: Who): Promise<void> {
+  const actor = actorFor(id);
+  if (!actor) throw new Error("No such agent.");
+  if (actor.session.owner && actor.session.owner.sub !== who.sub) throw new Error("This agent belongs to another account.");
+  if (actor.session.owner) return;
+  actor.session.owner = { sub: who.sub, ...(who.email ? { email: who.email } : {}), linkedAt: new Date().toISOString() };
+  record(actor, { kind: "you", by: "you", text: `You saved your agent to your account${who.email ? ` (${who.email})` : ""}` });
+  persist(actor);
+}
+
+export async function localErase(id: string): Promise<void> {
+  const owner = actorFor(id)?.session.owner;
+  await eraseActor(id);
+  if (owner && readAccounts()[owner.sub] === id) {
+    const all = readAccounts();
+    delete all[owner.sub];
+    writeFileSync(ACCOUNTS(), JSON.stringify(all), { mode: 0o600 });
+  }
 }

@@ -31,6 +31,11 @@ const Env = z.object({
   TURNSTILE_SECRET: z.string().min(1).optional(),
   // The hostnames a Turnstile token may come from, comma-separated. Never localhost in production.
   TURNSTILE_HOSTNAMES: z.string().optional(),
+
+  // Accounts through Supabase Auth. Both public by design (the publishable key ships to browsers). Unset, Open runs
+  // with anonymous agents only, as before.
+  OPEN_SUPABASE_URL: z.url().optional(),
+  OPEN_SUPABASE_PUBLISHABLE_KEY: z.string().min(1).optional(),
 });
 export type Env = z.infer<typeof Env>;
 

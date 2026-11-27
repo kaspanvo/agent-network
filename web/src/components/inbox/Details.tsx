@@ -235,6 +235,8 @@ export function AgentDetails(props: {
   privacy: PrivacyControls;
   keepLooking: { until: string; next: string; found: number } | null;
   onKeepLooking: (days: 0 | 7 | 14 | 30) => void;
+  // Saving the agent to an account, or managing it once saved. Absent when accounts are off.
+  account?: React.ReactNode;
   ready: boolean;
   threads: Thread[];
   activeId: string | null;
@@ -273,6 +275,7 @@ export function AgentDetails(props: {
           )
         }
       />
+      {props.account}
       {props.sentOut && <KeepLooking state={props.keepLooking} onSet={props.onKeepLooking} />}
       {props.threads.length > 0 && (
         <section aria-label="Your agent's network" className="flex flex-col gap-2 border-t border-line pt-4">

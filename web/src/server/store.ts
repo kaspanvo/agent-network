@@ -95,6 +95,8 @@ export type Session = {
   synthetic?: boolean;
   // Rooms that settled, with when. Closed rooms take no more messages and are deleted ROOM_KEEP_DAYS later.
   closed?: Record<string, string>;
+  // The account this agent is saved to. Only that account can reach it from then on.
+  owner?: { sub: string; email?: string; linkedAt: string };
 };
 
 const SESSION_ID = /^[0-9a-f-]{36}$/;
@@ -167,6 +169,8 @@ export function publicSession(session: Session) {
     // Who can reach the agent: the setting, strangers waiting for an answer, and who's blocked. Never the counters.
     reach: { policy: session.reach?.policy ?? "ask", requests: (session.reach?.requests ?? []).filter((r) => r.status === "pending"), blocked: session.reach?.blocked ?? [], allowed: session.reach?.allowed ?? [] },
     keepLooking: session.keepLooking ?? null,
+    // Saved to an account: which email, never the account's id.
+    owner: session.owner ? { email: session.owner.email ?? null } : null,
     // A simulated member: the inbox says so, with a way back to the simulation.
     synthetic: !!session.synthetic,
     // Settled rooms: closed, read-only, and when each is deleted.

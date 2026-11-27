@@ -17,12 +17,15 @@
       { "name": "PERSON_AGENT", "class_name": "PersonAgent" },
       { "name": "MARKET", "class_name": "MarketAgent" },
       // The service's daily budget: one object holds every counter.
-      { "name": "BUDGET", "class_name": "Budget" }
+      { "name": "BUDGET", "class_name": "Budget" },
+      // Which agent each account owns.
+      { "name": "ACCOUNTS", "class_name": "AccountDirectory" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["PersonAgent", "MarketAgent"] },
-    { "tag": "v2", "new_sqlite_classes": ["Budget"] }
+    { "tag": "v2", "new_sqlite_classes": ["Budget"] },
+    { "tag": "v3", "new_sqlite_classes": ["AccountDirectory"] }
   ],
   // Per-address rate limits at the edge, before any agent wakes. Counted per Cloudflare location, so they're a
   // flood guard; the daily caps in the Budget object are the exact ones.

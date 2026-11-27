@@ -19,7 +19,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^1.14.0",
     "@cloudflare/playwright": "^1.4.0",
+    "@supabase/supabase-js": "^2.119.2",
     "agents": "^0.34.1",
+    "jose": "^6.2.18",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0",

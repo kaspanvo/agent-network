@@ -3,7 +3,9 @@ import { join } from "node:path";
 import { handleApi, cookieOf } from "@/server/api";
 import { loadSession } from "@/server/local/files";
 import { liveRun, snapshot } from "@/sim/live";
-import { actorFor, eraseActor, startActor } from "@/server/local/registry";
+import { actorFor, localAgentInfo, localClaim, localDirectory, localErase, startActor } from "@/server/local/registry";
+import { accountConfig, identify } from "@/server/account";
+import { handleAccount } from "@/server/accountRoutes";
 import { SESSION_COOKIE } from "@/server/store";
 
 // Local development: every /api request goes to the same handler the Cloudflare Worker uses, with the
@@ -47,11 +49,22 @@ function dev(request: Request): Response | Promise<Response> | null {
   return null;
 }
 
-function handle(request: Request): Promise<Response> {
+async function handle(request: Request): Promise<Response> {
   const local = dev(request);
-  if (local) return Promise.resolve(local);
+  if (local) return local;
+  const current = cookieOf(request, SESSION_COOKIE);
+  const account = await handleAccount(request, {
+    config: accountConfig(),
+    who: await identify(request),
+    directory: localDirectory,
+    current: current && loadSession(current) ? current : null,
+    info: localAgentInfo,
+    claim: localClaim,
+    erase: localErase,
+  });
+  if (account) return account;
   const actor = actorFor(cookieOf(request, SESSION_COOKIE));
-  return handleApi(request, { actor, start: startActor, erase: async () => actor && eraseActor(actor.session.id) });
+  return handleApi(request, { actor, start: startActor, erase: async () => actor && localErase(actor.session.id), identify: (r) => identify(r), directory: localDirectory });
 }
 
 export { handle as GET, handle as POST, handle as PATCH, handle as PUT, handle as DELETE };

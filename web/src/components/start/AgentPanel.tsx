@@ -43,6 +43,8 @@ export type PrivacyControls = {
   onUnblock?: (agent: string) => void;
   // Deletes the agent and everything it holds (it asks first).
   onDeleteAll?: () => void;
+  // Downloads everything the agent holds (a saved agent may ask to confirm it's you first).
+  onExport?: () => void;
 };
 
 // Who can reach the agent: strangers waiting for an answer first, then the setting and anyone blocked.
@@ -358,9 +360,15 @@ export function AgentPanel({
 
       {privacy && (
         <p className="flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
-          <a href="/api/session/export" download className="min-h-9 underline underline-offset-2">
-            Download my data
-          </a>
+          {privacy.onExport ? (
+            <button type="button" onClick={privacy.onExport} className="min-h-9 underline underline-offset-2">
+              Download my data
+            </button>
+          ) : (
+            <a href="/api/session/export" download className="min-h-9 underline underline-offset-2">
+              Download my data
+            </a>
+          )}
           {privacy.onDeleteAll && (
             <button type="button" onClick={privacy.onDeleteAll} className="min-h-9 text-signal-ink underline underline-offset-2">
               Delete my agent
